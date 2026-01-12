@@ -1,2 +1,19 @@
 # DayLy
-DayLy is a full-stack scheduling and task management system designed to help users plan their time with precision and flexibility. It features interactive week and month calendar views powered by FullCalendar, supports recurring events using RRULE, and stores all timestamps in UTC to ensure accurate rendering across time zones. 
+
+DayLy is a scheduling and task management app with calendar-first planning.
+
+## Current Features
+
+- Week and month views powered by FullCalendar
+- Drag-and-drop task rescheduling
+- Priority filtering and category coloring
+- Supabase-backed task persistence
+- Canvas assignment scan/import flow
+- Home hub for future multi-use modules
+
+## Run Locally
+
+```bash
+npm install
+npm run dev
+```
