@@ -1,0 +1,878 @@
+/* ======================================================
+   RESET & BASE
+====================================================== */
+
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+html,
+body,
+#root {
+  height: 100%;
+  margin: 0;
+  padding: 0;
+}
+
+body {
+  font-family: Inter, system-ui, -apple-system, BlinkMacSystemFont,
+    "Segoe UI", Roboto, sans-serif;
+  background: #f6f7fb;
+  color: #1f2937;
+  line-height: 1.45;
+}
+
+:root {
+  --shadow-card: 0 1px 2px rgba(0, 0, 0, 0.08);
+  --shadow-panel: 0 20px 40px rgba(0, 0, 0, 0.25);
+  --shadow-modal: 0 30px 60px rgba(0, 0, 0, 0.35);
+}
+
+body.dark {
+  --shadow-card: 0 1px 2px rgba(0, 0, 0, 0.4);
+  --shadow-panel: 0 20px 40px rgba(0, 0, 0, 0.6);
+  --shadow-modal: 0 30px 60px rgba(0, 0, 0, 0.7);
+}
+
+/* ======================================================
+   APP LAYOUT
+====================================================== */
+
+.app-shell {
+  display: flex;
+  height: 100%;
+}
+
+/* ---------------- SIDEBAR ---------------- */
+
+.sidebar {
+  width: 240px;
+  background: #ffffff;
+  border-right: 1px solid #e5e7eb;
+  padding: 16px;
+  display: flex;
+  flex-direction: column;
+}
+
+.sidebar-header {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 20px;
+}
+
+.sidebar-logo {
+  width: 64px;
+  height: 64px;
+}
+
+.sidebar-title {
+  font-size: 24px;
+  font-weight: 600;
+}
+
+.sidebar-section-label {
+  font-size: 11px;
+  text-transform: uppercase;
+  color: #6b7280;
+  margin: 16px 0 6px;
+}
+
+.sidebar-nav {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.sidebar-btn {
+  padding: 8px 10px;
+  border-radius: 8px;
+  font-size: 14px;
+  text-align: left;
+  background: transparent;
+  border: none;
+  cursor: pointer;
+}
+
+.sidebar-btn:hover {
+  background: #f3f4f6;
+}
+
+.sidebar-btn.active {
+  background: #eef2ff;
+  color: #4338ca;
+  font-weight: 500;
+}
+
+.sidebar-btn.primary {
+  background: #4f46e5;
+  color: white;
+}
+
+.sidebar-btn.primary:hover {
+  background: #4338ca;
+}
+
+/* ---------------- FullCalendar typography overrides ---------------- */
+
+.fc-daygrid-event,
+.fc-daygrid-event .fc-event-title {
+  color: #1f2937 !important;
+  font-weight: 500;
+}
+
+.fc-timegrid-event,
+.fc-timegrid-event .fc-event-title,
+.fc-timegrid-event .fc-event-time {
+  color: #1f2937 !important;
+}
+
+
+/* ---------------- MAIN ---------------- */
+
+.main {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+}
+
+.topbar {
+  padding: 16px 20px;
+  border-bottom: 1px solid #e5e7eb;
+  background: white;
+}
+
+.topbar h1 {
+  font-size: 20px;
+  margin: 0;
+}
+
+.topbar-subtitle {
+  font-size: 12px;
+  color: #6b7280;
+}
+
+.main-content {
+  display: block;
+  height: 100%;
+}
+
+/* ======================================================
+   FULLCALENDAR (WEEK VIEW)
+====================================================== */
+
+.fc {
+  background: white;
+  border-radius: 12px;
+  padding: 8px;
+  height: 100%;
+}
+
+.fc-col-header-cell-cushion {
+  font-size: 12px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: #4b5563;
+}
+
+.fc-day-today {
+  background: rgba(79, 70, 229, 0.06) !important;
+}
+
+.fc-timegrid-axis-cushion {
+  font-size: 11px;
+  color: #6b7280;
+}
+
+.fc-timegrid-slot {
+  border-color: rgba(0, 0, 0, 0.03);
+}
+
+.fc-timegrid-slot-minor {
+  border-top: 1px dashed rgba(0, 0, 0, 0.03);
+}
+
+.fc-now-indicator-line {
+  border-color: #ef4444;
+  border-width: 2px;
+}
+
+/* Events */
+
+.fc-event {
+  border-radius: 10px !important;
+  border: none !important;
+  padding: 4px 6px;
+  font-weight: 500;
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.08);
+}
+
+.fc-event-title {
+  font-size: 12px;
+}
+
+.fc-event-time {
+  font-size: 11px;
+  opacity: 0.85;
+}
+
+.fc-event:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 6px 16px rgba(0, 0, 0, 0.15);
+  cursor: pointer;
+}
+
+.fc,
+.card,
+.surface {
+  box-shadow: var(--shadow-card);
+}
+
+/* ======================================================
+   SCROLLBAR (SUBTLE)
+====================================================== */
+
+::-webkit-scrollbar {
+  width: 8px;
+}
+
+::-webkit-scrollbar-thumb {
+  background: rgba(0, 0, 0, 0.15);
+  border-radius: 6px;
+}
+
+/* =========================
+   MODAL OVERLAY
+========================= */
+.modal-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(15, 23, 42, 0.45);
+  backdrop-filter: blur(2px);
+  z-index: 1000;
+}
+
+/* =========================
+   MODAL CARD
+========================= */
+.modal-card {
+  position: fixed;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+
+  width: 520px;
+  max-width: calc(100vw - 32px);
+
+  background: #ffffff;
+  border-radius: 12px;
+  box-shadow: var(--shadow-modal);
+
+  padding: 20px 22px;
+  z-index: 1001;
+}
+
+/* =========================
+   HEADER
+========================= */
+.modal-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 16px;
+}
+
+.modal-header h2 {
+  margin: 0;
+  font-size: 20px;
+  font-weight: 600;
+}
+
+.icon-btn {
+  background: none;
+  border: none;
+  font-size: 22px;
+  cursor: pointer;
+  opacity: 0.6;
+}
+
+.icon-btn:hover {
+  opacity: 1;
+}
+
+/* =========================
+   FORM ELEMENTS
+========================= */
+.form-group {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-bottom: 14px;
+}
+
+label {
+  font-size: 13px;
+  font-weight: 500;
+  color: #475569;
+}
+
+input,
+select {
+  height: 38px;
+  padding: 6px 10px;
+  border-radius: 8px;
+  border: 1px solid #cbd5e1;
+  font-size: 14px;
+}
+
+input:focus,
+select:focus {
+  outline: none;
+  border-color: #6366f1;
+  box-shadow: 0 0 0 1px #6366f1;
+}
+
+.input-lg {
+  height: 44px;
+  font-size: 15px;
+}
+
+input:not([type="checkbox"]),
+select,
+textarea {
+  width: 100%;
+}
+
+textarea {
+  min-height: 200px;
+  resize: vertical;
+  line-height: 1.45;
+  padding: 10px 12px;
+}
+
+textarea:focus {
+  outline: none;
+  border-color: var(--accent, #6366f1);
+}
+
+input,
+select {
+  height: 40px;
+}
+
+input[type="date"],
+input[type="time"] {
+  padding-right: 10px;
+}
+
+/* =========================
+   ROWS / COLUMNS
+========================= */
+
+.row {
+  display: flex;
+  gap: 12px;
+  align-items: flex-end;
+  /* THIS IS THE KEY */
+}
+
+.col {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  flex: 1;
+  min-width: 0;
+}
+
+/* =========================
+   CHECKBOX
+========================= */
+.checkbox-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-size: 13px;
+  color: #475569;
+  cursor: pointer;
+}
+
+.checkbox-row input[type="checkbox"] {
+  accent-color: var(--accent, #6366f1);
+  cursor: pointer;
+}
+
+/* =========================
+   SECTIONS
+========================= */
+.card-section {
+  padding: 12px;
+  border-radius: 10px;
+  background: #f8fafc;
+  border: 1px solid #e5e7eb;
+  margin-bottom: 14px;
+}
+
+/* =========================
+   FOOTER
+========================= */
+.modal-footer {
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
+  margin-top: 16px;
+}
+
+/* =========================
+   BUTTONS
+========================= */
+.btn {
+  height: 38px;
+  padding: 0 16px;
+  border-radius: 8px;
+  font-size: 14px;
+  cursor: pointer;
+  border: none;
+}
+
+.btn.primary {
+  background: #4f46e5;
+  color: white;
+}
+
+.btn.primary:hover {
+  background: #4338ca;
+}
+
+.btn.ghost {
+  background: #f1f5f9;
+  color: #334155;
+}
+
+.btn.ghost:hover {
+  background: #e2e8f0;
+}
+
+/* =========================
+   ERROR
+========================= */
+.error-banner {
+  background: #fee2e2;
+  color: #991b1b;
+  padding: 8px 12px;
+  border-radius: 8px;
+  font-size: 13px;
+  margin-bottom: 12px;
+}
+
+/* Ensure all inputs in a row align evenly */
+
+/* =========================
+   MICRO-INTERACTIONS
+========================= */
+
+input,
+select,
+textarea,
+button {
+  transition:
+    border-color 120ms ease,
+    box-shadow 120ms ease,
+    background-color 120ms ease,
+    color 120ms ease,
+    transform 120ms ease;
+}
+
+button:active {
+  transform: translateY(1px);
+}
+
+/* =========================
+   PRIORITY FILTER
+========================= */
+
+.priority-filter {
+  margin-top: 8px;
+  padding-left: 4px;
+}
+
+.priority-filter-title {
+  font-size: 12px;
+  font-weight: 600;
+  color: #6b7280;
+  margin-bottom: 8px;
+  text-transform: uppercase;
+}
+
+.priority-option {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 10px;
+  border-radius: 8px;
+  cursor: pointer;
+  transition: background 0.15s ease;
+}
+
+.priority-option:hover {
+  background: rgba(0, 0, 0, 0.04);
+}
+
+.priority-option input {
+  margin-left: auto;
+  pointer-events: none;
+}
+
+/* Dots */
+.priority-dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+}
+
+.priority-dot.high {
+  background: #dd4a4a;
+}
+
+.priority-dot.medium {
+  background: #facc15;
+}
+
+.priority-dot.low {
+  background: #4ade80;
+}
+
+.priority-label {
+  font-size: 14px;
+  color: #000000;
+}
+
+/* Dark mode */
+body.dark .priority-option:hover {
+  background: rgba(255, 255, 255, 0.08);
+}
+
+body.dark .priority-label {
+  color: #e5e7eb;
+}
+
+/* ======================================================
+   DARK MODE COLOR SYSTEM
+====================================================== */
+
+body.dark {
+  /* App backgrounds */
+  --bg-app: #0b1020;
+  --bg-surface: #111827;
+  --bg-elevated: #161f36;
+  --bg-hover: #1f293b;
+
+  /* Borders */
+  --border-subtle: #273449;
+
+  /* Text */
+  --text-primary: #e5e7eb;
+  --text-secondary: #9ca3af;
+  --text-muted: #6b7280;
+
+  /* Accent */
+  --accent: #6366f1;
+  --accent-hover: #818cf8;
+
+  background: var(--bg-app);
+  color: var(--text-primary);
+}
+
+/* ======================================================
+   GLOBAL SURFACES
+====================================================== */
+
+body.dark .sidebar,
+body.dark .topbar {
+  background: var(--bg-surface);
+  border-color: var(--border-subtle);
+}
+
+body.dark .main {
+  background: var(--bg-app);
+}
+
+body.dark .fc {
+  background: var(--bg-elevated);
+  border-color: var(--border-subtle);
+}
+
+/* ======================================================
+   SIDEBAR
+====================================================== */
+
+body.dark .sidebar-section-label {
+  color: var(--text-muted);
+}
+
+body.dark .sidebar-btn {
+  color: var(--text-secondary);
+}
+
+body.dark .sidebar-btn:hover {
+  background: var(--bg-hover);
+  color: var(--text-primary);
+}
+
+body.dark .sidebar-btn.active {
+  background: rgba(99, 102, 241, 0.15);
+  color: var(--accent);
+}
+
+body.dark .sidebar-btn.primary {
+  background: var(--accent);
+  color: white;
+}
+
+body.dark .sidebar-btn.primary:hover {
+  background: var(--accent-hover);
+}
+
+/* ======================================================
+   TOPBAR
+====================================================== */
+
+body.dark .topbar h1 {
+  color: var(--text-primary);
+}
+
+body.dark .topbar-subtitle {
+  color: var(--text-muted);
+}
+
+/* ======================================================
+   FULLCALENDAR
+====================================================== */
+
+body.dark .fc-col-header-cell-cushion {
+  color: var(--text-secondary);
+}
+
+body.dark .fc-timegrid-axis-cushion {
+  color: var(--text-muted);
+}
+
+body.dark .fc-timegrid-slot,
+body.dark .fc-timegrid-slot-minor {
+  border-color: rgba(255, 255, 255, 0.04);
+}
+
+body.dark .fc-day-today {
+  background: rgba(99, 102, 241, 0.12) !important;
+}
+
+body.dark .fc-event {
+  box-shadow: none;
+}
+
+body.dark .fc-event-title,
+body.dark .fc-event-time {
+  color: black !important;
+}
+
+/* ======================================================
+   PANELS & MODALS
+====================================================== */
+
+body.dark .task-panel,
+body.dark .modal-card {
+  background: var(--bg-elevated);
+  color: var(--text-primary);
+  border: 1px solid var(--border-subtle);
+}
+
+body.dark .modal-title,
+body.dark .modal-header h2 {
+  color: var(--text-primary);
+}
+
+body.dark .modal-overlay {
+  background: rgba(11, 16, 32, 0.6);
+}
+
+/* ======================================================
+   FORMS & INPUTS
+====================================================== */
+
+body.dark input,
+body.dark select,
+body.dark textarea {
+  background: var(--bg-surface);
+  color: var(--text-primary);
+  border: 1px solid var(--border-subtle);
+}
+
+body.dark input::placeholder,
+body.dark textarea::placeholder {
+  color: var(--text-muted);
+}
+
+body.dark input:focus,
+body.dark select:focus,
+body.dark textarea:focus {
+  border-color: var(--accent);
+  box-shadow: none;
+}
+
+/* ======================================================
+   BUTTONS
+====================================================== */
+
+body.dark .btn.primary,
+body.dark .save-btn {
+  background: var(--accent);
+  color: white;
+}
+
+body.dark .btn.primary:hover,
+body.dark .save-btn:hover {
+  background: var(--accent-hover);
+}
+
+body.dark .btn.secondary,
+body.dark .btn.ghost {
+  background: var(--bg-hover);
+  color: var(--text-secondary);
+}
+
+body.dark .btn.secondary:hover,
+body.dark .btn.ghost:hover {
+  background: rgba(255, 255, 255, 0.08);
+  color: var(--text-primary);
+}
+
+body.dark .delete-btn {
+  background: rgba(220, 38, 38, 0.15);
+  color: #fca5a5;
+}
+
+body.dark .delete-btn:hover {
+  background: rgba(220, 38, 38, 0.25);
+}
+
+/* ======================================================
+   PRIORITY FILTER
+====================================================== */
+
+body.dark .priority-label {
+  color: var(--text-secondary);
+}
+
+body.dark .priority-option:hover {
+  background: var(--bg-hover);
+}
+
+/* ======================================================
+   SCROLLBAR
+====================================================== */
+
+body.dark ::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.2);
+}
+
+/* =========================
+   SIDE PANEL (EDIT / SETTINGS)
+========================= */
+
+.panel-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(15, 23, 42, 0.45);
+  backdrop-filter: blur(2px);
+  z-index: 900;
+}
+
+.side-panel {
+  position: fixed;
+  right: 20px;
+  top: 20px;
+  bottom: 20px;
+  width: 460px;
+  max-width: calc(100vw - 40px);
+
+  background: #ffffff;
+  border-radius: 16px;
+  box-shadow: var(--shadow-panel);
+
+  display: flex;
+  flex-direction: column;
+  z-index: 901;
+
+  overflow: hidden;
+}
+
+.panel-header {
+  padding: 18px 20px 14px;
+  border-bottom: 1px solid #e5e7eb;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+body:not(.dark) .panel-header {
+  background: linear-gradient(to bottom,
+      rgba(255, 255, 255, 0.6),
+      rgba(255, 255, 255, 0));
+}
+
+
+.panel-header h2 {
+  margin: 0;
+  font-size: 20px;
+  font-weight: 600;
+}
+
+.panel-body {
+  padding: 18px 20px;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  flex: 1;
+}
+
+.panel-body>.form-group {
+  margin-bottom: 20px;
+}
+
+.card-section {
+  margin-top: 4px;
+  margin-bottom: 18px;
+}
+
+.panel-footer {
+  padding: 14px 20px;
+  border-top: 1px solid var(--border-subtle, #e5e7eb);
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+/* Dark mode */
+body.dark .side-panel {
+  background: var(--bg-elevated);
+  border: 1px solid var(--border-subtle);
+}
+
+body.dark .panel-header,
+body.dark .panel-footer {
+  border-color: var(--border-subtle);
+}
+
+body.dark .panel-header {
+  background: linear-gradient(to bottom,
+      rgba(255, 255, 255, 0.04),
+      rgba(255, 255, 255, 0));
+}
+
+body.dark .card-section {
+  background: var(--bg-surface);
+  border: 1px solid var(--border-subtle);
+}
