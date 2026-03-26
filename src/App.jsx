@@ -45,12 +45,119 @@ const MODULES = [
 const ACTIONABLE_PROJECT_CATEGORIES = ["school", "work"];
 const ACTIONABLE_PROJECT_KEYWORDS = ["homework", "assignment", "project", "essay", "lab", "exam", "study"];
 const ROUTINE_EXCLUDE_KEYWORDS = ["gym", "class", "lecture", "workout", "practice"];
+const PLANNER_CATEGORY_OPTIONS = ["all", "school", "work", "personal", "health", "errands", "other"];
+const HOME_UPCOMING_LIMIT = 5;
+const WORKFLOW_BUCKET_ORDER = ["inbox", "today", "upcoming", "overdue", "done"];
+const TIME_WINDOW_RANGES = {
+  any: { startHour: 8, endHour: 22 },
+  morning: { startHour: 8, endHour: 12 },
+  afternoon: { startHour: 12, endHour: 17 },
+  evening: { startHour: 17, endHour: 22 },
+};
 
 function normalizeKanbanStatus(value) {
   if (value === "todo" || value === "in_progress" || value === "done") {
     return value;
   }
   return "todo";
+}
+
+function getTaskSourceDate(task) {
+  const source = task.start_time || task.due_date;
+  if (!source) return null;
+
+  const date = new Date(source);
+  return Number.isNaN(date.getTime()) ? null : date;
+}
+
+function isDashboardActionableTask(task) {
+  const repeat = String(task.repeat || "none").toLowerCase();
+  const text = `${task.title || ""} ${task.description || ""} ${task.location || ""}`.toLowerCase();
+  const looksRoutine = ROUTINE_EXCLUDE_KEYWORDS.some((word) => text.includes(word));
+  const looksProjectLike = ACTIONABLE_PROJECT_KEYWORDS.some((word) => text.includes(word));
+  const isRecurring = repeat !== "none";
+
+  if (looksRoutine && !looksProjectLike) return false;
+  if (isRecurring && !looksProjectLike) return false;
+
+  return true;
+}
+
+function getTaskWorkflowBucket(task, now = new Date()) {
+  if (task.completed_at) return "done";
+
+  const sourceDate = getTaskSourceDate(task);
+  if (!sourceDate) return "inbox";
+
+  if (sourceDate.toDateString() === now.toDateString()) {
+    return "today";
+  }
+
+  if (sourceDate < now) {
+    return "overdue";
+  }
+
+  return "upcoming";
+}
+
+function formatWorkflowBucketLabel(bucket) {
+  if (bucket === "inbox") return "Inbox";
+  if (bucket === "today") return "Today";
+  if (bucket === "upcoming") return "Upcoming";
+  if (bucket === "overdue") return "Overdue";
+  if (bucket === "done") return "Done";
+  return "Active";
+}
+
+function startOfDay(date) {
+  const value = new Date(date);
+  value.setHours(0, 0, 0, 0);
+  return value;
+}
+
+function endOfDay(date) {
+  const value = new Date(date);
+  value.setHours(23, 59, 59, 999);
+  return value;
+}
+
+function setDateWithHour(date, hour) {
+  const value = new Date(date);
+  value.setHours(hour, 0, 0, 0);
+  return value;
+}
+
+function addMinutes(date, minutes) {
+  return new Date(date.getTime() + minutes * 60000);
+}
+
+function findNextAvailableSlot(events, rangeStart, rangeEnd, durationMinutes) {
+  let cursor = new Date(rangeStart);
+
+  for (const block of events) {
+    if (block.end <= cursor) continue;
+    if (block.start >= rangeEnd) break;
+
+    if (addMinutes(cursor, durationMinutes) <= block.start) {
+      return {
+        start: new Date(cursor),
+        end: addMinutes(cursor, durationMinutes),
+      };
+    }
+
+    if (block.end > cursor) {
+      cursor = new Date(block.end);
+    }
+  }
+
+  if (addMinutes(cursor, durationMinutes) <= rangeEnd) {
+    return {
+      start: new Date(cursor),
+      end: addMinutes(cursor, durationMinutes),
+    };
+  }
+
+  return null;
 }
 
 export default function App() {
@@ -67,6 +174,19 @@ export default function App() {
   const [theme, setTheme] = useState("light");
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [canvasScanning, setCanvasScanning] = useState(false);
+  const [plannerSearch, setPlannerSearch] = useState("");
+  const [plannerCategory, setPlannerCategory] = useState("all");
+  const [showCompletedTasks, setShowCompletedTasks] = useState(false);
+  const [plannerPanel, setPlannerPanel] = useState("overview");
+  const [quickAddTitle, setQuickAddTitle] = useState("");
+  const [quickAddDate, setQuickAddDate] = useState(() => new Date().toISOString().slice(0, 10));
+  const [quickAddStartTime, setQuickAddStartTime] = useState("09:00");
+  const [quickAddEndTime, setQuickAddEndTime] = useState("10:00");
+  const [quickAddCategory, setQuickAddCategory] = useState("other");
+  const [quickAddPriority, setQuickAddPriority] = useState("medium");
+  const [quickAddTimed, setQuickAddTimed] = useState(true);
+  const [quickAddSaving, setQuickAddSaving] = useState(false);
+  const [applyingPlan, setApplyingPlan] = useState(false);
 
   const [visiblePriorities, setVisiblePriorities] = useState({
     high: true,
@@ -108,17 +228,298 @@ export default function App() {
     return () => clearTimeout(timer);
   }, []);
 
-  const monthTasks = tasks.filter((task) => visiblePriorities[task.priority || "medium"]);
+  const basePlannerTasks = useMemo(() => {
+    const query = plannerSearch.trim().toLowerCase();
+
+    return tasks.filter((task) => {
+      const priorityVisible = visiblePriorities[task.priority || "medium"];
+      if (!priorityVisible) return false;
+
+      if (plannerCategory !== "all" && task.category !== plannerCategory) {
+        return false;
+      }
+
+      if (!query) return true;
+
+      const haystack = `${task.title || ""} ${task.description || ""} ${task.location || ""}`.toLowerCase();
+      return haystack.includes(query);
+    });
+  }, [tasks, visiblePriorities, plannerCategory, plannerSearch]);
+
+  const filteredPlannerTasks = useMemo(() => {
+    if (showCompletedTasks) return basePlannerTasks;
+    return basePlannerTasks.filter((task) => !task.completed_at);
+  }, [basePlannerTasks, showCompletedTasks]);
 
   const homeStats = useMemo(() => {
     const highPriorityCount = tasks.filter((t) => t.priority === "high").length;
     const timedCount = tasks.filter((t) => t.start_time && t.end_time).length;
+    const completedCount = tasks.filter((t) => Boolean(t.completed_at)).length;
+    const now = new Date();
+    const todayKey = now.toDateString();
+    const dueTodayCount = tasks.filter((task) => {
+      if (task.completed_at) return false;
+      if (!isDashboardActionableTask(task)) return false;
+      const source = task.start_time || task.due_date;
+      if (!source) return false;
+      return new Date(source).toDateString() === todayKey;
+    }).length;
+
     return {
       total: tasks.length,
       high: highPriorityCount,
       timed: timedCount,
+      completed: completedCount,
+      dueToday: dueTodayCount,
     };
   }, [tasks]);
+
+  const homeUpcomingTasks = useMemo(() => {
+    const now = new Date();
+
+    return tasks
+      .filter((task) => {
+        if (task.completed_at) return false;
+        if (!isDashboardActionableTask(task)) return false;
+        const source = task.start_time || task.due_date;
+        if (!source) return false;
+        return new Date(source) >= now;
+      })
+      .sort((a, b) => {
+        const aTime = new Date(a.start_time || a.due_date).getTime();
+        const bTime = new Date(b.start_time || b.due_date).getTime();
+        return aTime - bTime;
+      });
+  }, [tasks]);
+
+  const visibleHomeUpcomingTasks = useMemo(
+    () => homeUpcomingTasks.slice(0, HOME_UPCOMING_LIMIT),
+    [homeUpcomingTasks]
+  );
+
+  const hiddenHomeUpcomingCount = Math.max(0, homeUpcomingTasks.length - HOME_UPCOMING_LIMIT);
+
+  const homeOverdueTasks = useMemo(() => {
+    const now = new Date();
+    const todayKey = now.toDateString();
+
+    return tasks
+      .filter((task) => {
+        if (task.completed_at) return false;
+        if (!isDashboardActionableTask(task)) return false;
+        const source = task.start_time || task.due_date;
+        if (!source) return false;
+        const date = new Date(source);
+        return date < now && date.toDateString() !== todayKey;
+      })
+      .sort((a, b) => {
+        const aTime = new Date(a.start_time || a.due_date).getTime();
+        const bTime = new Date(b.start_time || b.due_date).getTime();
+        return aTime - bTime;
+      })
+      .slice(0, 4);
+  }, [tasks]);
+
+  const homeRecentlyCompletedTasks = useMemo(() => {
+    return tasks
+      .filter((task) => Boolean(task.completed_at))
+      .sort((a, b) => new Date(b.completed_at).getTime() - new Date(a.completed_at).getTime())
+      .slice(0, 4);
+  }, [tasks]);
+
+  const actionableWorkflowBuckets = useMemo(() => {
+    const grouped = {
+      inbox: [],
+      today: [],
+      upcoming: [],
+      overdue: [],
+      done: [],
+    };
+
+    const actionableTasks = tasks.filter((task) => isDashboardActionableTask(task));
+    const now = new Date();
+
+    for (const task of actionableTasks) {
+      grouped[getTaskWorkflowBucket(task, now)].push(task);
+    }
+
+    for (const bucket of WORKFLOW_BUCKET_ORDER) {
+      grouped[bucket].sort((a, b) => {
+        const aTime = getTaskSourceDate(a)?.getTime() ?? Number.MAX_SAFE_INTEGER;
+        const bTime = getTaskSourceDate(b)?.getTime() ?? Number.MAX_SAFE_INTEGER;
+        return aTime - bTime;
+      });
+    }
+
+    return grouped;
+  }, [tasks]);
+
+  const todayPlanSuggestions = useMemo(() => {
+    const now = new Date();
+    const dayStart = startOfDay(now);
+    const dayEnd = endOfDay(now);
+    const scheduledBlocks = tasks
+      .filter((task) => {
+        if (!task.start_time || !task.end_time) return false;
+        const start = new Date(task.start_time);
+        return start >= dayStart && start <= dayEnd;
+      })
+      .map((task) => ({
+        start: new Date(task.start_time),
+        end: new Date(task.end_time),
+      }))
+      .sort((a, b) => a.start - b.start);
+
+    const candidates = tasks
+      .filter((task) => {
+        if (task.completed_at) return false;
+        if (!isDashboardActionableTask(task)) return false;
+        if (task.start_time && task.end_time) return false;
+        const bucket = getTaskWorkflowBucket(task, now);
+        return bucket === "overdue" || bucket === "today" || bucket === "inbox";
+      })
+      .sort((a, b) => {
+        const bucketRank = {
+          overdue: 0,
+          today: 1,
+          inbox: 2,
+          upcoming: 3,
+          done: 4,
+        };
+        const priorityRank = {
+          high: 0,
+          medium: 1,
+          low: 2,
+        };
+        const bucketDiff =
+          bucketRank[getTaskWorkflowBucket(a, now)] - bucketRank[getTaskWorkflowBucket(b, now)];
+        if (bucketDiff !== 0) return bucketDiff;
+
+        const priorityDiff =
+          (priorityRank[a.priority || "medium"] ?? 1) - (priorityRank[b.priority || "medium"] ?? 1);
+        if (priorityDiff !== 0) return priorityDiff;
+
+        const aTime = getTaskSourceDate(a)?.getTime() ?? Number.MAX_SAFE_INTEGER;
+        const bTime = getTaskSourceDate(b)?.getTime() ?? Number.MAX_SAFE_INTEGER;
+        return aTime - bTime;
+      });
+
+    const workingBlocks = [...scheduledBlocks];
+    const suggestions = [];
+
+    for (const task of candidates) {
+      const preferredWindow = task.preferred_time_window || "any";
+      const { startHour, endHour } = TIME_WINDOW_RANGES[preferredWindow] || TIME_WINDOW_RANGES.any;
+      const rangeStart = setDateWithHour(now, startHour);
+      const rangeEnd = setDateWithHour(now, endHour);
+      const durationMinutes = task.estimated_duration_minutes || 60;
+
+      const slot = findNextAvailableSlot(workingBlocks, rangeStart, rangeEnd, durationMinutes);
+      if (!slot) continue;
+
+      const suggestion = {
+        task,
+        start: slot.start,
+        end: slot.end,
+        bucket: getTaskWorkflowBucket(task, now),
+        preferredWindow,
+      };
+
+      suggestions.push(suggestion);
+      workingBlocks.push({ start: slot.start, end: slot.end });
+      workingBlocks.sort((a, b) => a.start - b.start);
+
+      if (suggestions.length >= 5) break;
+    }
+
+    return suggestions;
+  }, [tasks]);
+
+  const workflowSummaryCards = useMemo(() => {
+    return [
+      {
+        key: "inbox",
+        label: "Inbox",
+        count: actionableWorkflowBuckets.inbox.length,
+        detail: "No date yet",
+      },
+      {
+        key: "today",
+        label: "Today",
+        count: actionableWorkflowBuckets.today.length,
+        detail: "Needs action now",
+      },
+      {
+        key: "upcoming",
+        label: "Upcoming",
+        count: actionableWorkflowBuckets.upcoming.length,
+        detail: "Scheduled ahead",
+      },
+      {
+        key: "overdue",
+        label: "Overdue",
+        count: actionableWorkflowBuckets.overdue.length,
+        detail: "Needs attention",
+      },
+      {
+        key: "done",
+        label: "Done",
+        count: actionableWorkflowBuckets.done.length,
+        detail: "Completed work",
+      },
+    ];
+  }, [actionableWorkflowBuckets]);
+
+  const plannerStats = useMemo(() => {
+    const timed = filteredPlannerTasks.filter((task) => task.start_time && task.end_time);
+    const high = filteredPlannerTasks.filter((task) => task.priority === "high");
+    const completed = basePlannerTasks.filter((task) => Boolean(task.completed_at));
+
+    return {
+      visible: filteredPlannerTasks.length,
+      timed: timed.length,
+      high: high.length,
+      completed: completed.length,
+    };
+  }, [basePlannerTasks, filteredPlannerTasks]);
+
+  const plannerFocusStats = useMemo(() => {
+    const now = new Date();
+    const todayKey = now.toDateString();
+    const weekAhead = new Date(now);
+    weekAhead.setDate(weekAhead.getDate() + 7);
+
+    let overdue = 0;
+    let dueToday = 0;
+    let dueThisWeek = 0;
+
+    for (const task of filteredPlannerTasks) {
+      const source = task.start_time || task.due_date;
+      if (!source) continue;
+
+      const date = new Date(source);
+      if (task.completed_at) continue;
+
+      if (date < now && date.toDateString() !== todayKey) {
+        overdue += 1;
+        continue;
+      }
+
+      if (date.toDateString() === todayKey) {
+        dueToday += 1;
+      }
+
+      if (date >= now && date <= weekAhead) {
+        dueThisWeek += 1;
+      }
+    }
+
+    return {
+      overdue,
+      dueToday,
+      dueThisWeek,
+    };
+  }, [filteredPlannerTasks]);
 
   const actionableProjectTasks = useMemo(() => {
     return tasks.filter((task) => {
@@ -144,7 +545,7 @@ export default function App() {
     return Object.fromEntries(
       actionableProjectTasks.map((task) => [
         String(task.id),
-        normalizeKanbanStatus(task.kanban_status),
+        task.completed_at ? "done" : normalizeKanbanStatus(task.kanban_status),
       ])
     );
   }, [actionableProjectTasks]);
@@ -163,12 +564,111 @@ export default function App() {
     setShowModal(true);
   }
 
+  function formatPlannerTaskDate(task) {
+    const source = task.start_time || task.due_date;
+    if (!source) return "No date";
+
+    const date = new Date(source);
+    const hasTime = Boolean(task.start_time && task.end_time);
+
+    return date.toLocaleDateString(undefined, {
+      weekday: "short",
+      month: "short",
+      day: "numeric",
+      ...(hasTime ? { hour: "numeric", minute: "2-digit" } : {}),
+    });
+  }
+
+  function movePlannerWindow(direction) {
+    const d = new Date(currentDate);
+
+    if (calendarView === "day") {
+      d.setDate(d.getDate() + direction);
+    } else if (calendarView === "week") {
+      d.setDate(d.getDate() + direction * 7);
+    } else {
+      d.setMonth(d.getMonth() + direction);
+    }
+
+    setCurrentDate(d);
+  }
+
+  function getPlannerTitle() {
+    if (calendarView === "day") {
+      return currentDate.toLocaleDateString(undefined, {
+        weekday: "long",
+        month: "long",
+        day: "numeric",
+      });
+    }
+
+    return currentDate.toLocaleDateString(undefined, {
+      month: "long",
+      year: "numeric",
+    });
+  }
+
+  function focusToday() {
+    setCurrentDate(new Date());
+    setCalendarView("day");
+  }
+
   function handleTaskClick(task) {
     setSelectedTask(task);
   }
 
   function handleTaskCreated() {
     setShowModal(false);
+    fetchTasks();
+  }
+
+  async function handleQuickAddSubmit() {
+    if (!quickAddTitle.trim()) {
+      toast.error("Quick add needs a task title.");
+      return;
+    }
+
+    setQuickAddSaving(true);
+
+    let startIso = null;
+    let endIso = null;
+
+    if (quickAddTimed) {
+      const start = new Date(`${quickAddDate}T${quickAddStartTime}`);
+      const end = new Date(`${quickAddDate}T${quickAddEndTime}`);
+
+      if (end <= start) {
+        setQuickAddSaving(false);
+        toast.error("End time must be after start time.");
+        return;
+      }
+
+      startIso = start.toISOString();
+      endIso = end.toISOString();
+    }
+
+    const { error } = await supabase.from("tasks").insert({
+      title: quickAddTitle.trim(),
+      category: quickAddCategory,
+      priority: quickAddPriority,
+      repeat: "none",
+      due_date: new Date(`${quickAddDate}T00:00`).toISOString(),
+      start_time: startIso,
+      end_time: endIso,
+    });
+
+    setQuickAddSaving(false);
+
+    if (error) {
+      toast.error(error.message || "Could not create task.");
+      return;
+    }
+
+    setQuickAddTitle("");
+    setQuickAddPriority("medium");
+    setQuickAddCategory("other");
+    setQuickAddTimed(true);
+    toast.success("Task added");
     fetchTasks();
   }
 
@@ -210,6 +710,51 @@ export default function App() {
     }
 
     toast.error(error.message || "Could not update board status.");
+  }
+
+  async function handleTaskCompletionToggle(taskId, completed) {
+    const taskIdValue = String(taskId);
+    const nextCompletedAt = completed ? new Date().toISOString() : null;
+    let previousCompletedAt = null;
+
+    setTasks((prev) =>
+      prev.map((task) => {
+        if (String(task.id) !== taskIdValue) return task;
+        previousCompletedAt = task.completed_at || null;
+        return {
+          ...task,
+          completed_at: nextCompletedAt,
+        };
+      })
+    );
+
+    const { error } = await supabase
+      .from("tasks")
+      .update({ completed_at: nextCompletedAt })
+      .eq("id", taskId);
+
+    if (!error) {
+      toast.success(completed ? "Task marked complete" : "Task marked active");
+      return true;
+    }
+
+    setTasks((prev) =>
+      prev.map((task) =>
+        String(task.id) === taskIdValue ? { ...task, completed_at: previousCompletedAt } : task
+      )
+    );
+
+    const missingColumn =
+      typeof error.message === "string" &&
+      error.message.toLowerCase().includes("completed_at");
+
+    if (missingColumn) {
+      toast.error("Missing `completed_at` column in Supabase. Run the new SQL migration first.");
+      return false;
+    }
+
+    toast.error(error.message || "Could not update task completion.");
+    return false;
   }
 
   function rangesOverlap(aStart, aEnd, bStart, bEnd) {
@@ -304,6 +849,38 @@ export default function App() {
     }
   }
 
+  async function handleApplyPlanMyDay() {
+    if (!todayPlanSuggestions.length || applyingPlan) return;
+
+    setApplyingPlan(true);
+
+    try {
+      for (const suggestion of todayPlanSuggestions) {
+        const { error } = await supabase
+          .from("tasks")
+          .update({
+            due_date: startOfDay(suggestion.start).toISOString(),
+            start_time: suggestion.start.toISOString(),
+            end_time: suggestion.end.toISOString(),
+          })
+          .eq("id", suggestion.task.id);
+
+        if (error) {
+          throw error;
+        }
+      }
+
+      toast.success("Applied your plan for today.");
+      setPlannerPanel("overview");
+      focusToday();
+      fetchTasks();
+    } catch (error) {
+      toast.error(error.message || "Could not apply the plan.");
+    } finally {
+      setApplyingPlan(false);
+    }
+  }
+
   return (
     <>
       <Toaster position="top-right" />
@@ -314,56 +891,236 @@ export default function App() {
             <div className="home-brand">
               <img src={logo} alt="DayLy logo" className="home-logo" />
               <div>
-                <div className="home-kicker">Multi-Use Workspace</div>
-                <h1>DayLy Platform</h1>
+                <div className="home-kicker">Workspace Platform</div>
+                <h1>DayLy</h1>
+                <p className="home-header-copy">
+                  One place for planning, execution, and the next tools you add over time.
+                </p>
               </div>
             </div>
 
-            <button className="topbar-btn" onClick={toggleTheme}>
-              {theme === "light" ? "Enable Dark Mode" : "Disable Dark Mode"}
-            </button>
+            <div className="home-header-actions">
+              <button className="topbar-btn" onClick={() => setActiveModule("planner")}>
+                Open Planner
+              </button>
+              <button className="topbar-btn" onClick={toggleTheme}>
+                {theme === "light" ? "Dark Mode" : "Light Mode"}
+              </button>
+            </div>
           </header>
 
-          <section className="home-hero">
-            <h2>Choose your workflow</h2>
-            <p>
-              Start from one central hub and expand into planners, project boards, habits, and
-              more.
-            </p>
+          <section className="home-summary-grid">
+            <article className="home-summary-card home-summary-card-primary">
+              <div className="home-summary-label">Actionable Work</div>
+              <strong>
+                {actionableWorkflowBuckets.inbox.length +
+                  actionableWorkflowBuckets.today.length +
+                  actionableWorkflowBuckets.upcoming.length +
+                  actionableWorkflowBuckets.overdue.length}
+              </strong>
+              <p>Active assignments, exams, and one-off work across your system.</p>
+            </article>
+            <article className="home-summary-card">
+              <div className="home-summary-label">Due Today</div>
+              <strong>{homeStats.dueToday}</strong>
+              <p>Immediate work that should stay visible at the top of your workflow.</p>
+            </article>
+            <article className="home-summary-card">
+              <div className="home-summary-label">Completed</div>
+              <strong>{homeStats.completed}</strong>
+              <p>Finished tasks already captured in the current workspace.</p>
+            </article>
           </section>
 
-          <section className="home-stats">
-            <article className="home-stat-card">
-              <span>Total Tasks</span>
-              <strong>{homeStats.total}</strong>
-            </article>
-            <article className="home-stat-card">
-              <span>High Priority</span>
-              <strong>{homeStats.high}</strong>
-            </article>
-            <article className="home-stat-card">
-              <span>Timed Tasks</span>
-              <strong>{homeStats.timed}</strong>
-            </article>
+          <section className="workflow-strip">
+            {workflowSummaryCards.map((card) => (
+              <article
+                key={card.key}
+                className={`workflow-card workflow-${card.key}`}
+              >
+                <div className="workflow-card-label">{card.label}</div>
+                <strong>{card.count}</strong>
+                <span>{card.detail}</span>
+              </article>
+            ))}
           </section>
 
-          <section className="module-grid">
-            {MODULES.map((module) => {
-              const live = module.status === "Live";
-              return (
-                <article key={module.id} className={`module-card ${live ? "live" : ""}`}>
-                  <div className="module-status">{module.status}</div>
-                  <h3>{module.title}</h3>
-                  <p>{module.subtitle}</p>
-                  <button
-                    className={`btn ${live ? "primary" : "ghost"}`}
-                    onClick={() => openModule(module.id)}
-                  >
-                    {module.cta}
-                  </button>
-                </article>
-              );
-            })}
+          <section className="home-workspace-grid">
+            <section className="home-surface home-modules-surface">
+              <div className="surface-header">
+                <div>
+                  <div className="home-kicker">Workspaces</div>
+                  <h2>Choose where you want to work</h2>
+                </div>
+              </div>
+
+              <div className="module-grid">
+                {MODULES.map((module) => {
+                  const live = module.status === "Live";
+                  const moduleMeta =
+                    module.id === "planner"
+                      ? `${filteredPlannerTasks.length} active tasks`
+                      : module.id === "projects"
+                        ? `${actionableProjectTasks.length} tracked project tasks`
+                        : "Planned module";
+
+                  return (
+                    <article key={module.id} className={`module-card ${live ? "live" : ""}`}>
+                      <div className="module-card-topline">
+                        <div className="module-status">{module.status}</div>
+                        <div className="module-meta-note">{moduleMeta}</div>
+                      </div>
+                      <h3>{module.title}</h3>
+                      <p>{module.subtitle}</p>
+                      <button
+                        className={`btn ${live ? "primary" : "ghost"}`}
+                        onClick={() => openModule(module.id)}
+                      >
+                        {module.cta}
+                      </button>
+                    </article>
+                  );
+                })}
+              </div>
+            </section>
+
+            <aside className="home-surface home-upcoming home-upcoming-sidebar">
+              <div className="surface-header">
+                <div>
+                  <div className="home-kicker">Upcoming Queue</div>
+                  <h2>Next actionable tasks</h2>
+                </div>
+                <div className="home-upcoming-count">
+                  {Math.min(homeUpcomingTasks.length, HOME_UPCOMING_LIMIT)} visible
+                </div>
+              </div>
+
+              <div className="home-upcoming-list home-upcoming-checklist">
+                {visibleHomeUpcomingTasks.length ? (
+                  visibleHomeUpcomingTasks.map((task) => (
+                    <div key={task.id} className="home-upcoming-check-item">
+                      <label className="home-upcoming-check-label">
+                        <input
+                          type="checkbox"
+                          checked={Boolean(task.completed_at)}
+                          onChange={(event) =>
+                            handleTaskCompletionToggle(task.id, event.target.checked)
+                          }
+                        />
+                        <div
+                          className="home-upcoming-check-content"
+                          onClick={() => {
+                            setActiveModule("planner");
+                            setSelectedTask(task);
+                          }}
+                          role="button"
+                          tabIndex={0}
+                          onKeyDown={(event) => {
+                            if (event.key === "Enter" || event.key === " ") {
+                              event.preventDefault();
+                              setActiveModule("planner");
+                              setSelectedTask(task);
+                            }
+                          }}
+                        >
+                          <div className="home-upcoming-title">{task.title}</div>
+                          <div className="home-upcoming-meta">
+                            <span>{formatPlannerTaskDate(task)}</span>
+                            <span className={`workflow-badge workflow-${getTaskWorkflowBucket(task)}`}>
+                              {formatWorkflowBucketLabel(getTaskWorkflowBucket(task))}
+                            </span>
+                            <span className={`planner-priority priority-${task.priority || "medium"}`}>
+                              {task.priority || "medium"}
+                            </span>
+                          </div>
+                        </div>
+                      </label>
+                    </div>
+                  ))
+                ) : (
+                  <div className="home-upcoming-empty">No upcoming active tasks right now.</div>
+                )}
+              </div>
+
+              {hiddenHomeUpcomingCount > 0 && (
+                <div className="home-upcoming-footer">
+                  {hiddenHomeUpcomingCount} more task{hiddenHomeUpcomingCount === 1 ? "" : "s"} queued.
+                </div>
+              )}
+            </aside>
+          </section>
+
+          <section className="home-secondary-grid">
+            <section className="home-surface home-panel home-panel-overdue">
+              <div className="surface-header">
+                <div>
+                  <div className="home-kicker">Overdue</div>
+                  <h2>Needs attention</h2>
+                </div>
+              </div>
+
+              <div className="home-panel-list">
+                {homeOverdueTasks.length ? (
+                  homeOverdueTasks.map((task) => (
+                    <button
+                      key={task.id}
+                      className="home-panel-item"
+                      onClick={() => {
+                        setActiveModule("planner");
+                        setSelectedTask(task);
+                      }}
+                    >
+                      <div className="home-panel-title">{task.title}</div>
+                      <div className="home-panel-meta">
+                        <span>{formatPlannerTaskDate(task)}</span>
+                        <span className={`workflow-badge workflow-${getTaskWorkflowBucket(task)}`}>
+                          {formatWorkflowBucketLabel(getTaskWorkflowBucket(task))}
+                        </span>
+                        <span className={`planner-priority priority-${task.priority || "medium"}`}>
+                          {task.priority || "medium"}
+                        </span>
+                      </div>
+                    </button>
+                  ))
+                ) : (
+                  <div className="home-panel-empty">Nothing overdue right now.</div>
+                )}
+              </div>
+            </section>
+
+            <section className="home-surface home-panel">
+              <div className="surface-header">
+                <div>
+                  <div className="home-kicker">Recently Completed</div>
+                  <h2>Finished work</h2>
+                </div>
+              </div>
+
+              <div className="home-panel-list">
+                {homeRecentlyCompletedTasks.length ? (
+                  homeRecentlyCompletedTasks.map((task) => (
+                    <div key={task.id} className="home-panel-item is-completed">
+                      <div className="home-panel-title">{task.title}</div>
+                      <div className="home-panel-meta">
+                        <span>
+                          Completed{" "}
+                          {new Date(task.completed_at).toLocaleDateString(undefined, {
+                            month: "short",
+                            day: "numeric",
+                          })}
+                        </span>
+                        <span className="workflow-badge workflow-done">Done</span>
+                        <span className={`planner-priority priority-${task.priority || "medium"}`}>
+                          {task.priority || "medium"}
+                        </span>
+                      </div>
+                    </div>
+                  ))
+                ) : (
+                  <div className="home-panel-empty">Completed tasks will show up here.</div>
+                )}
+              </div>
+            </section>
           </section>
         </div>
       ) : (
@@ -400,6 +1157,13 @@ export default function App() {
               <>
                 <div className="sidebar-section-label">Views</div>
                 <div className="sidebar-nav">
+                  <button
+                    className={`sidebar-btn ${calendarView === "day" ? "active" : ""}`}
+                    onClick={() => setCalendarView("day")}
+                  >
+                    Day
+                  </button>
+
                   <button
                     className={`sidebar-btn ${calendarView === "month" ? "active" : ""}`}
                     onClick={() => setCalendarView("month")}
@@ -457,6 +1221,41 @@ export default function App() {
               </>
             )}
 
+            {isPlannerModule && (
+              <>
+                <div className="sidebar-section-label">Planner Filters</div>
+                <div className="planner-sidebar-tools">
+                  <input
+                    className="planner-search-input"
+                    placeholder="Search tasks"
+                    value={plannerSearch}
+                    onChange={(e) => setPlannerSearch(e.target.value)}
+                  />
+
+                  <select
+                    className="planner-category-select"
+                    value={plannerCategory}
+                    onChange={(e) => setPlannerCategory(e.target.value)}
+                  >
+                    {PLANNER_CATEGORY_OPTIONS.map((value) => (
+                      <option key={value} value={value}>
+                        {value === "all" ? "All Categories" : value[0].toUpperCase() + value.slice(1)}
+                      </option>
+                    ))}
+                  </select>
+
+                  <label className="checkbox-row planner-toggle-row">
+                    <input
+                      type="checkbox"
+                      checked={showCompletedTasks}
+                      onChange={(e) => setShowCompletedTasks(e.target.checked)}
+                    />
+                    Show completed tasks
+                  </label>
+                </div>
+              </>
+            )}
+
             {isProjectsModule && (
               <div className="kanban-summary">
                 Showing {actionableProjectTasks.length} work-focused tasks.
@@ -467,46 +1266,40 @@ export default function App() {
 
           <main className="main">
             {isPlannerModule ? (
-              <header className="topbar">
-                <div className="topbar-left">
-                  <button
-                    className="topbar-btn"
-                    onClick={() => {
-                      const d = new Date(currentDate);
-                      calendarView === "week"
-                        ? d.setDate(d.getDate() - 7)
-                        : d.setMonth(d.getMonth() - 1);
-                      setCurrentDate(d);
-                    }}
-                  >
-                    Prev
-                  </button>
+              <>
+                <header className="topbar">
+                  <div>
+                    <div className="topbar-title">Planner</div>
+                    <div className="topbar-subtitle">
+                      Calendar-first planning with quick capture and weekly focus.
+                    </div>
+                  </div>
 
-                  <button className="topbar-btn" onClick={() => setCurrentDate(new Date())}>
-                    Today
-                  </button>
-
-                  <button
-                    className="topbar-btn"
-                    onClick={() => {
-                      const d = new Date(currentDate);
-                      calendarView === "week"
-                        ? d.setDate(d.getDate() + 7)
-                        : d.setMonth(d.getMonth() + 1);
-                      setCurrentDate(d);
-                    }}
-                  >
-                    Next
-                  </button>
-                </div>
-
-                <div className="topbar-title">
-                  {currentDate.toLocaleDateString(undefined, {
-                    month: "long",
-                    year: "numeric",
-                  })}
-                </div>
-              </header>
+                  <div className="topbar-left">
+                    <button className="topbar-btn" onClick={() => movePlannerWindow(-1)}>
+                      Prev
+                    </button>
+                    <button className="topbar-btn" onClick={() => setCurrentDate(new Date())}>
+                      Today
+                    </button>
+                    <button className="topbar-btn" onClick={() => movePlannerWindow(1)}>
+                      Next
+                    </button>
+                    <button className="topbar-btn" onClick={focusToday}>
+                      Focus Today
+                    </button>
+                    <button
+                      className="topbar-btn"
+                      onClick={() => {
+                        setPlannerPanel("autoPlan");
+                        focusToday();
+                      }}
+                    >
+                      Plan My Day
+                    </button>
+                  </div>
+                </header>
+              </>
             ) : (
               <header className="topbar">
                 <div>
@@ -523,18 +1316,269 @@ export default function App() {
 
             <div className="main-content">
               {isPlannerModule ? (
-                <FullCalendarView
-                  tasks={calendarView === "month" ? monthTasks : tasks}
-                  view={calendarView}
-                  currentDate={currentDate}
-                  onTimeSlotClick={handleTimeSlotClick}
-                  onTaskClick={handleTaskClick}
-                  onEventTimeChange={handleEventTimeChange}
-                />
+                <>
+                  <section className="planner-header-grid">
+                    <div className="planner-page-title">
+                      <div className="home-kicker">Current Window</div>
+                      <h2>{getPlannerTitle()}</h2>
+                    </div>
+
+                    <div className="planner-mini-stats">
+                      <article className="planner-mini-stat">
+                        <span>Visible</span>
+                        <strong>{plannerStats.visible}</strong>
+                      </article>
+                      <article className="planner-mini-stat">
+                        <span>Today</span>
+                        <strong>{plannerFocusStats.dueToday}</strong>
+                      </article>
+                      <article className="planner-mini-stat">
+                        <span>Overdue</span>
+                        <strong>{plannerFocusStats.overdue}</strong>
+                      </article>
+                    </div>
+                  </section>
+
+                  <div className="planner-workspace">
+                    <div className="planner-calendar-shell">
+                      <FullCalendarView
+                        tasks={filteredPlannerTasks}
+                        view={calendarView}
+                        currentDate={currentDate}
+                        onTimeSlotClick={handleTimeSlotClick}
+                        onTaskClick={handleTaskClick}
+                        onEventTimeChange={handleEventTimeChange}
+                      />
+                    </div>
+                  </div>
+
+                  <section className="planner-dock">
+                    <div className="planner-dock-tabs">
+                      <button
+                        className={`planner-dock-tab ${plannerPanel === "overview" ? "active" : ""}`}
+                        onClick={() => setPlannerPanel("overview")}
+                      >
+                        Overview
+                      </button>
+                      <button
+                        className={`planner-dock-tab ${plannerPanel === "quickAdd" ? "active" : ""}`}
+                        onClick={() => setPlannerPanel("quickAdd")}
+                      >
+                        Quick Add
+                      </button>
+                      <button
+                        className={`planner-dock-tab ${plannerPanel === "autoPlan" ? "active" : ""}`}
+                        onClick={() => setPlannerPanel("autoPlan")}
+                      >
+                        Auto Plan
+                      </button>
+                      <button
+                        className="planner-dock-tab"
+                        onClick={() => setActiveModule("home")}
+                      >
+                        Home Dashboard
+                      </button>
+                    </div>
+
+                    <div className="planner-dock-panel">
+                      {plannerPanel === "overview" && (
+                        <>
+                          <section className="planner-overview planner-overview-side">
+                            <article className="planner-overview-card">
+                              <span>Visible Tasks</span>
+                              <strong>{plannerStats.visible}</strong>
+                            </article>
+                            <article className="planner-overview-card">
+                              <span>Timed Blocks</span>
+                              <strong>{plannerStats.timed}</strong>
+                            </article>
+                            <article className="planner-overview-card">
+                              <span>High Priority</span>
+                              <strong>{plannerStats.high}</strong>
+                            </article>
+                            <article className="planner-overview-card">
+                              <span>Completed</span>
+                              <strong>{plannerStats.completed}</strong>
+                            </article>
+                          </section>
+
+                          <section className="planner-focus-strip planner-focus-strip-side">
+                            <button className="planner-focus-card is-primary" onClick={focusToday}>
+                              <span>Today</span>
+                              <strong>{plannerFocusStats.dueToday}</strong>
+                              <small>tasks scheduled today</small>
+                            </button>
+
+                            <div className="planner-focus-card">
+                              <span>Overdue</span>
+                              <strong>{plannerFocusStats.overdue}</strong>
+                              <small>need attention</small>
+                            </div>
+
+                            <div className="planner-focus-card">
+                              <span>Next 7 Days</span>
+                              <strong>{plannerFocusStats.dueThisWeek}</strong>
+                              <small>coming up soon</small>
+                            </div>
+                          </section>
+                        </>
+                      )}
+
+                      {plannerPanel === "quickAdd" && (
+                          <section className="planner-quick-add planner-quick-add-side">
+                            <div className="planner-quick-add-copy">
+                              <span className="planner-quick-add-kicker">Quick Add</span>
+                              <h3>Capture a task fast</h3>
+                            </div>
+
+                          <div className="planner-quick-add-grid planner-quick-add-grid-side">
+                            <input
+                              className="planner-quick-add-title"
+                              placeholder="What needs to get done?"
+                              value={quickAddTitle}
+                              onChange={(e) => setQuickAddTitle(e.target.value)}
+                              onKeyDown={(e) => {
+                                if (e.key === "Enter") {
+                                  e.preventDefault();
+                                  handleQuickAddSubmit();
+                                }
+                              }}
+                            />
+
+                            <input
+                              type="date"
+                              value={quickAddDate}
+                              onChange={(e) => setQuickAddDate(e.target.value)}
+                            />
+
+                            <label className="checkbox-row planner-quick-add-toggle">
+                              <input
+                                type="checkbox"
+                                checked={quickAddTimed}
+                                onChange={(e) => setQuickAddTimed(e.target.checked)}
+                              />
+                              Timed
+                            </label>
+
+                            {quickAddTimed && (
+                              <>
+                                <input
+                                  type="time"
+                                  value={quickAddStartTime}
+                                  onChange={(e) => setQuickAddStartTime(e.target.value)}
+                                />
+                                <input
+                                  type="time"
+                                  value={quickAddEndTime}
+                                  onChange={(e) => setQuickAddEndTime(e.target.value)}
+                                />
+                              </>
+                            )}
+
+                            <select
+                              value={quickAddCategory}
+                              onChange={(e) => setQuickAddCategory(e.target.value)}
+                            >
+                              <option value="school">School</option>
+                              <option value="work">Work</option>
+                              <option value="personal">Personal</option>
+                              <option value="health">Health</option>
+                              <option value="errands">Errands</option>
+                              <option value="other">Other</option>
+                            </select>
+
+                            <select
+                              value={quickAddPriority}
+                              onChange={(e) => setQuickAddPriority(e.target.value)}
+                            >
+                              <option value="high">High</option>
+                              <option value="medium">Medium</option>
+                              <option value="low">Low</option>
+                            </select>
+
+                            <button
+                              className="btn primary planner-quick-add-button"
+                              onClick={handleQuickAddSubmit}
+                              disabled={quickAddSaving}
+                            >
+                              {quickAddSaving ? "Adding..." : "Add"}
+                            </button>
+                          </div>
+                        </section>
+                      )}
+
+                      {plannerPanel === "autoPlan" && (
+                        <section className="planner-plan-board">
+                          <div className="planner-plan-header">
+                            <div>
+                              <span className="planner-quick-add-kicker">Auto Plan</span>
+                              <h3>Suggested schedule for today</h3>
+                              <p>
+                                DayLy is placing overdue, due-today, and unscheduled work into open
+                                time slots.
+                              </p>
+                            </div>
+                            <button
+                              className="btn primary"
+                              onClick={handleApplyPlanMyDay}
+                              disabled={applyingPlan || !todayPlanSuggestions.length}
+                            >
+                              {applyingPlan ? "Applying..." : "Apply Plan"}
+                            </button>
+                          </div>
+
+                          <div className="planner-plan-list">
+                            {todayPlanSuggestions.length ? (
+                              todayPlanSuggestions.map((suggestion) => (
+                                <article key={suggestion.task.id} className="planner-plan-item">
+                                  <div className="planner-plan-time">
+                                    {suggestion.start.toLocaleTimeString([], {
+                                      hour: "numeric",
+                                      minute: "2-digit",
+                                    })}{" "}
+                                    -{" "}
+                                    {suggestion.end.toLocaleTimeString([], {
+                                      hour: "numeric",
+                                      minute: "2-digit",
+                                    })}
+                                  </div>
+                                  <div className="planner-plan-content">
+                                    <div className="planner-plan-title">{suggestion.task.title}</div>
+                                    <div className="planner-plan-meta">
+                                      <span className={`workflow-badge workflow-${suggestion.bucket}`}>
+                                        {formatWorkflowBucketLabel(suggestion.bucket)}
+                                      </span>
+                                      <span className={`planner-priority priority-${suggestion.task.priority || "medium"}`}>
+                                        {suggestion.task.priority || "medium"}
+                                      </span>
+                                      <span className="planner-plan-window">
+                                        {suggestion.preferredWindow === "any"
+                                          ? "Any time"
+                                          : suggestion.preferredWindow}
+                                      </span>
+                                    </div>
+                                  </div>
+                                </article>
+                              ))
+                            ) : (
+                              <div className="planner-agenda-empty">
+                                No smart scheduling suggestions right now. Add unscheduled work with
+                                duration estimates to generate a daily plan.
+                              </div>
+                            )}
+                          </div>
+                        </section>
+                      )}
+                    </div>
+                  </section>
+                </>
               ) : (
                 <ProjectKanbanBoard
                   tasks={actionableProjectTasks}
                   statusByTask={kanbanStatusByTask}
+                  workflowBucketByTask={Object.fromEntries(
+                    actionableProjectTasks.map((task) => [String(task.id), getTaskWorkflowBucket(task)])
+                  )}
                   onTaskClick={handleTaskClick}
                   onStatusChange={handleKanbanStatusChange}
                 />
@@ -559,6 +1603,7 @@ export default function App() {
               }}
               onUpdated={fetchTasks}
               onDeleted={fetchTasks}
+              onCompletionToggle={handleTaskCompletionToggle}
             />
 
             <SettingsPanel

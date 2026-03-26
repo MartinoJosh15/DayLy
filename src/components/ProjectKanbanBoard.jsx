@@ -37,9 +37,19 @@ function sortByDueDate(a, b) {
   return aValue - bValue;
 }
 
+function formatWorkflowLabel(value) {
+  if (value === "inbox") return "Inbox";
+  if (value === "today") return "Today";
+  if (value === "upcoming") return "Upcoming";
+  if (value === "overdue") return "Overdue";
+  if (value === "done") return "Done";
+  return "Inbox";
+}
+
 export default function ProjectKanbanBoard({
   tasks = [],
   statusByTask = {},
+  workflowBucketByTask = {},
   onStatusChange,
   onTaskClick,
 }) {
@@ -162,6 +172,9 @@ export default function ProjectKanbanBoard({
                       {PRIORITY_LABELS[priority] || "Medium"}
                     </span>
                     <span className="kanban-meta-pill">{formatDueDate(task.due_date)}</span>
+                    <span className={`kanban-meta-pill workflow-${workflowBucketByTask[String(task.id)] || "inbox"}`}>
+                      {formatWorkflowLabel(workflowBucketByTask[String(task.id)] || "inbox")}
+                    </span>
                   </div>
 
                   <div className="kanban-drag-hint">Drag to another column</div>

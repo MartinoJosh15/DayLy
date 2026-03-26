@@ -149,7 +149,13 @@ export default function FullCalendarView({
     if (!calendarRef.current) return;
     calendarRef.current
       .getApi()
-      .changeView(view === "month" ? "dayGridMonth" : "timeGridWeek");
+      .changeView(
+        view === "month"
+          ? "dayGridMonth"
+          : view === "day"
+            ? "timeGridDay"
+            : "timeGridWeek"
+      );
   }, [view]);
 
   return (
@@ -157,7 +163,13 @@ export default function FullCalendarView({
       ref={calendarRef}
       plugins={[timeGridPlugin, dayGridPlugin, interactionPlugin, rrulePlugin]}
       timeZone="local"
-      initialView={view === "month" ? "dayGridMonth" : "timeGridWeek"}
+      initialView={
+        view === "month"
+          ? "dayGridMonth"
+          : view === "day"
+            ? "timeGridDay"
+            : "timeGridWeek"
+      }
       headerToolbar={false}
       height="100%"
       expandRows
@@ -184,6 +196,12 @@ export default function FullCalendarView({
           info.el.style.backgroundColor = color;
           info.el.style.borderColor = color;
           info.el.style.color = "#1f2937";
+        }
+
+        if (task.completed_at) {
+          info.el.style.opacity = "0.45";
+          info.el.style.filter = "grayscale(0.2)";
+          info.el.style.textDecoration = "line-through";
         }
       }}
       dateClick={(info) => {
