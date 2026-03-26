@@ -20,6 +20,23 @@ const CATEGORY_LABELS = {
   other: "Other",
 };
 
+const WEEKDAY_OPTIONS = [
+  { value: "mon", label: "M" },
+  { value: "tue", label: "T" },
+  { value: "wed", label: "W" },
+  { value: "thu", label: "Th" },
+  { value: "fri", label: "F" },
+  { value: "sat", label: "Sa" },
+  { value: "sun", label: "Su" },
+];
+
+const TIME_WINDOW_OPTIONS = [
+  { value: "any", label: "Any time" },
+  { value: "morning", label: "Morning" },
+  { value: "afternoon", label: "Afternoon" },
+  { value: "evening", label: "Evening" },
+];
+
 function formatLocalTime(date) {
   return date.toLocaleTimeString([], {
     hour: "2-digit",
@@ -65,7 +82,10 @@ export default function AddTaskModal({
   const [category, setCategory] = useState(defaultCategory);
   const [priority, setPriority] = useState("medium");
   const [repeat, setRepeat] = useState("none");
+  const [repeatDays, setRepeatDays] = useState([]);
   const [location, setLocation] = useState("");
+  const [estimatedDuration, setEstimatedDuration] = useState(isTimed ? 60 : 45);
+  const [preferredTimeWindow, setPreferredTimeWindow] = useState("any");
 
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
@@ -73,6 +93,11 @@ export default function AddTaskModal({
   async function handleSubmit() {
     if (!title.trim()) {
       setError("Title is required");
+      return;
+    }
+
+    if (repeat === "weekly" && !repeatDays.length) {
+      setError("Choose at least one day for a weekly repeat");
       return;
     }
 
@@ -101,7 +126,10 @@ export default function AddTaskModal({
       category,
       priority,
       repeat,
+      repeat_days: repeat === "weekly" ? repeatDays : [],
       location: location || null,
+      estimated_duration_minutes: Number(estimatedDuration) || null,
+      preferred_time_window: preferredTimeWindow,
       due_date: new Date(`${date}T00:00`).toISOString(),
       start_time: startUTC,
       end_time: endUTC,
@@ -116,6 +144,12 @@ export default function AddTaskModal({
 
     toast.success("Task added");
     onCreated();
+  }
+
+  function toggleRepeatDay(day) {
+    setRepeatDays((prev) =>
+      prev.includes(day) ? prev.filter((value) => value !== day) : [...prev, day]
+    );
   }
 
   return (
@@ -199,6 +233,40 @@ export default function AddTaskModal({
           <input placeholder="Optional" value={location} onChange={(e) => setLocation(e.target.value)} />
         </div>
 
+        <div className="card-section">
+          <div className="row">
+            <div className="col">
+              <label>Estimated duration</label>
+              <select
+                value={estimatedDuration}
+                onChange={(e) => setEstimatedDuration(e.target.value)}
+              >
+                <option value="15">15 min</option>
+                <option value="30">30 min</option>
+                <option value="45">45 min</option>
+                <option value="60">1 hour</option>
+                <option value="90">1.5 hours</option>
+                <option value="120">2 hours</option>
+                <option value="180">3 hours</option>
+              </select>
+            </div>
+
+            <div className="col">
+              <label>Preferred time</label>
+              <select
+                value={preferredTimeWindow}
+                onChange={(e) => setPreferredTimeWindow(e.target.value)}
+              >
+                {TIME_WINDOW_OPTIONS.map((option) => (
+                  <option key={option.value} value={option.value}>
+                    {option.label}
+                  </option>
+                ))}
+              </select>
+            </div>
+          </div>
+        </div>
+
         <div className="form-group">
           <label>Repeat</label>
           <select value={repeat} onChange={(e) => setRepeat(e.target.value)}>
@@ -209,6 +277,24 @@ export default function AddTaskModal({
             <option value="monthly">Monthly</option>
           </select>
         </div>
+
+        {repeat === "weekly" && (
+          <div className="form-group">
+            <label>Repeat on</label>
+            <div className="weekday-picker">
+              {WEEKDAY_OPTIONS.map((day) => (
+                <button
+                  key={day.value}
+                  type="button"
+                  className={`weekday-chip ${repeatDays.includes(day.value) ? "active" : ""}`}
+                  onClick={() => toggleRepeatDay(day.value)}
+                >
+                  {day.label}
+                </button>
+              ))}
+            </div>
+          </div>
+        )}
 
         <footer className="modal-footer">
           <button className="btn ghost" onClick={onClose}>
