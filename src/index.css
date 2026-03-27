@@ -3220,6 +3220,27 @@ body {
   color: var(--app-text-muted);
 }
 
+.deployment-help {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  color: var(--app-text-soft);
+}
+
+.deployment-help p {
+  margin: 0;
+}
+
+.deployment-help code {
+  display: inline-block;
+  width: fit-content;
+  padding: 8px 10px;
+  border-radius: 10px;
+  border: 1px solid var(--app-border);
+  background: rgba(255, 255, 255, 0.88);
+  color: var(--app-text);
+}
+
 .fc {
   box-shadow: none;
 }
@@ -3363,6 +3384,12 @@ body.dark .home-upcoming-empty,
 body.dark .kanban-summary {
   background: rgba(15, 26, 45, 0.92);
   border-color: rgba(71, 85, 105, 0.5);
+}
+
+body.dark .deployment-help code {
+  background: var(--app-panel-strong);
+  border-color: var(--app-border);
+  color: var(--app-text);
 }
 
 body.dark .workflow-card {
