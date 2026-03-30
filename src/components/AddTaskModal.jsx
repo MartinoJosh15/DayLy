@@ -37,12 +37,27 @@ const TIME_WINDOW_OPTIONS = [
   { value: "evening", label: "Evening" },
 ];
 
+function isPlanningFieldMissing(error) {
+  const message = String(error?.message || "").toLowerCase();
+  return (
+    message.includes("estimated_duration_minutes") ||
+    message.includes("preferred_time_window")
+  );
+}
+
 function formatLocalTime(date) {
   return date.toLocaleTimeString([], {
     hour: "2-digit",
     minute: "2-digit",
     hour12: false,
   });
+}
+
+function formatLocalDateInput(date) {
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, "0");
+  const day = String(date.getDate()).padStart(2, "0");
+  return `${year}-${month}-${day}`;
 }
 
 function addMinutes(date, minutes) {
@@ -57,8 +72,8 @@ export default function AddTaskModal({
   categoryOptions,
 }) {
   const initialDate = initialDateTime
-    ? initialDateTime.toISOString().slice(0, 10)
-    : new Date().toISOString().slice(0, 10);
+    ? formatLocalDateInput(initialDateTime)
+    : formatLocalDateInput(new Date());
 
   const initialTime = initialDateTime ? formatLocalTime(initialDateTime) : "09:00";
   const initialEndTime = initialDateTime ? formatLocalTime(addMinutes(initialDateTime, 60)) : "10:00";
@@ -121,7 +136,7 @@ export default function AddTaskModal({
       endUTC = localEnd.toISOString();
     }
 
-    const { error: insertError } = await supabase.from("tasks").insert({
+    const payload = {
       title,
       category,
       priority,
@@ -133,7 +148,30 @@ export default function AddTaskModal({
       due_date: new Date(`${date}T00:00`).toISOString(),
       start_time: startUTC,
       end_time: endUTC,
-    });
+    };
+
+    let { error: insertError } = await supabase.from("tasks").insert(payload);
+
+    if (insertError && isPlanningFieldMissing(insertError)) {
+      const fallbackPayload = {
+        title,
+        category,
+        priority,
+        repeat,
+        repeat_days: repeat === "weekly" ? repeatDays : [],
+        location: location || null,
+        due_date: new Date(`${date}T00:00`).toISOString(),
+        start_time: startUTC,
+        end_time: endUTC,
+      };
+
+      const fallbackResult = await supabase.from("tasks").insert(fallbackPayload);
+      insertError = fallbackResult.error;
+
+      if (!insertError) {
+        toast("Task added, but planning fields are not in Supabase yet.");
+      }
+    }
 
     setSaving(false);
 
