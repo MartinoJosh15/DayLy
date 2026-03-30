@@ -131,6 +131,13 @@ function addMinutes(date, minutes) {
   return new Date(date.getTime() + minutes * 60000);
 }
 
+function formatLocalDateInput(date) {
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, "0");
+  const day = String(date.getDate()).padStart(2, "0");
+  return `${year}-${month}-${day}`;
+}
+
 function findNextAvailableSlot(events, rangeStart, rangeEnd, durationMinutes) {
   let cursor = new Date(rangeStart);
 
@@ -178,8 +185,9 @@ export default function App() {
   const [plannerCategory, setPlannerCategory] = useState("all");
   const [showCompletedTasks, setShowCompletedTasks] = useState(false);
   const [plannerPanel, setPlannerPanel] = useState("overview");
+  const [plannerDockOpen, setPlannerDockOpen] = useState(false);
   const [quickAddTitle, setQuickAddTitle] = useState("");
-  const [quickAddDate, setQuickAddDate] = useState(() => new Date().toISOString().slice(0, 10));
+  const [quickAddDate, setQuickAddDate] = useState(() => formatLocalDateInput(new Date()));
   const [quickAddStartTime, setQuickAddStartTime] = useState("09:00");
   const [quickAddEndTime, setQuickAddEndTime] = useState("10:00");
   const [quickAddCategory, setQuickAddCategory] = useState("other");
@@ -945,79 +953,43 @@ export default function App() {
             </div>
           </header>
 
-          <section className="home-summary-grid">
-            <article className="home-summary-card home-summary-card-primary">
-              <div className="home-summary-label">Actionable Work</div>
-              <strong>
-                {actionableWorkflowBuckets.inbox.length +
-                  actionableWorkflowBuckets.today.length +
-                  actionableWorkflowBuckets.upcoming.length +
-                  actionableWorkflowBuckets.overdue.length}
-              </strong>
-              <p>Active assignments, exams, and one-off work across your system.</p>
-            </article>
-            <article className="home-summary-card">
-              <div className="home-summary-label">Due Today</div>
-              <strong>{homeStats.dueToday}</strong>
-              <p>Immediate work that should stay visible at the top of your workflow.</p>
-            </article>
-            <article className="home-summary-card">
-              <div className="home-summary-label">Completed</div>
-              <strong>{homeStats.completed}</strong>
-              <p>Finished tasks already captured in the current workspace.</p>
-            </article>
-          </section>
-
-          <section className="workflow-strip">
-            {workflowSummaryCards.map((card) => (
-              <article
-                key={card.key}
-                className={`workflow-card workflow-${card.key}`}
-              >
-                <div className="workflow-card-label">{card.label}</div>
-                <strong>{card.count}</strong>
-                <span>{card.detail}</span>
-              </article>
-            ))}
-          </section>
-
-          <section className="home-workspace-grid">
-            <section className="home-surface home-modules-surface">
+          <section className="home-primary-grid">
+            <section className="home-surface home-command-surface">
               <div className="surface-header">
                 <div>
-                  <div className="home-kicker">Workspaces</div>
-                  <h2>Choose where you want to work</h2>
+                  <div className="home-kicker">Dashboard</div>
+                  <h2>Start with what matters today</h2>
                 </div>
               </div>
 
-              <div className="module-grid">
-                {MODULES.map((module) => {
-                  const live = module.status === "Live";
-                  const moduleMeta =
-                    module.id === "planner"
-                      ? `${filteredPlannerTasks.length} active tasks`
-                      : module.id === "projects"
-                        ? `${actionableProjectTasks.length} tracked project tasks`
-                        : "Planned module";
+              <section className="home-summary-grid home-summary-grid-compact">
+                <article className="home-summary-card home-summary-card-primary">
+                  <div className="home-summary-label">Actionable Work</div>
+                  <strong>
+                    {actionableWorkflowBuckets.inbox.length +
+                      actionableWorkflowBuckets.today.length +
+                      actionableWorkflowBuckets.upcoming.length +
+                      actionableWorkflowBuckets.overdue.length}
+                  </strong>
+                  <p>Active assignments, exams, and one-off work.</p>
+                </article>
+                <article className="home-summary-card">
+                  <div className="home-summary-label">Today Snapshot</div>
+                  <strong>
+                    {homeStats.dueToday} due, {actionableWorkflowBuckets.overdue.length} overdue
+                  </strong>
+                  <p>{homeStats.completed} completed overall.</p>
+                </article>
+              </section>
 
-                  return (
-                    <article key={module.id} className={`module-card ${live ? "live" : ""}`}>
-                      <div className="module-card-topline">
-                        <div className="module-status">{module.status}</div>
-                        <div className="module-meta-note">{moduleMeta}</div>
-                      </div>
-                      <h3>{module.title}</h3>
-                      <p>{module.subtitle}</p>
-                      <button
-                        className={`btn ${live ? "primary" : "ghost"}`}
-                        onClick={() => openModule(module.id)}
-                      >
-                        {module.cta}
-                      </button>
-                    </article>
-                  );
-                })}
-              </div>
+              <section className="workflow-strip workflow-strip-inline">
+                {workflowSummaryCards.map((card) => (
+                  <div key={card.key} className={`workflow-card workflow-${card.key}`}>
+                    <div className="workflow-card-label">{card.label}</div>
+                    <strong>{card.count}</strong>
+                  </div>
+                ))}
+              </section>
             </section>
 
             <aside className="home-surface home-upcoming home-upcoming-sidebar">
@@ -1084,6 +1056,44 @@ export default function App() {
                 </div>
               )}
             </aside>
+          </section>
+
+          <section className="home-surface home-workspaces-section">
+            <div className="surface-header">
+              <div>
+                <div className="home-kicker">Workspaces</div>
+                <h2>Choose where you want to work</h2>
+              </div>
+            </div>
+
+            <section className="module-grid">
+              {MODULES.map((module) => {
+                const live = module.status === "Live";
+                const moduleMeta =
+                  module.id === "planner"
+                    ? `${filteredPlannerTasks.length} active tasks`
+                    : module.id === "projects"
+                      ? `${actionableProjectTasks.length} tracked project tasks`
+                      : "Planned module";
+
+                return (
+                  <article key={module.id} className={`module-card ${live ? "live" : ""}`}>
+                    <div className="module-card-topline">
+                      <div className="module-status">{module.status}</div>
+                      <div className="module-meta-note">{moduleMeta}</div>
+                    </div>
+                    <h3>{module.title}</h3>
+                    <p>{module.subtitle}</p>
+                    <button
+                      className={`btn ${live ? "primary" : "ghost"}`}
+                      onClick={() => openModule(module.id)}
+                    >
+                      {module.cta}
+                    </button>
+                  </article>
+                );
+              })}
+            </section>
           </section>
 
           <section className="home-secondary-grid">
@@ -1307,7 +1317,7 @@ export default function App() {
                   <div>
                     <div className="topbar-title">Planner</div>
                     <div className="topbar-subtitle">
-                      Calendar-first planning with quick capture and weekly focus.
+                      {getPlannerTitle()}
                     </div>
                   </div>
 
@@ -1328,10 +1338,17 @@ export default function App() {
                       className="topbar-btn"
                       onClick={() => {
                         setPlannerPanel("autoPlan");
+                        setPlannerDockOpen(true);
                         focusToday();
                       }}
                     >
                       Plan My Day
+                    </button>
+                    <button
+                      className="topbar-btn"
+                      onClick={() => setPlannerDockOpen((prev) => !prev)}
+                    >
+                      {plannerDockOpen ? "Hide Tools" : "Show Tools"}
                     </button>
                   </div>
                 </header>
@@ -1353,29 +1370,7 @@ export default function App() {
             <div className="main-content">
               {isPlannerModule ? (
                 <>
-                  <section className="planner-header-grid">
-                    <div className="planner-page-title">
-                      <div className="home-kicker">Current Window</div>
-                      <h2>{getPlannerTitle()}</h2>
-                    </div>
-
-                    <div className="planner-mini-stats">
-                      <article className="planner-mini-stat">
-                        <span>Visible</span>
-                        <strong>{plannerStats.visible}</strong>
-                      </article>
-                      <article className="planner-mini-stat">
-                        <span>Today</span>
-                        <strong>{plannerFocusStats.dueToday}</strong>
-                      </article>
-                      <article className="planner-mini-stat">
-                        <span>Overdue</span>
-                        <strong>{plannerFocusStats.overdue}</strong>
-                      </article>
-                    </div>
-                  </section>
-
-                  <div className="planner-workspace">
+                  <div className={`planner-workspace ${plannerDockOpen ? "with-dock" : ""}`}>
                     <div className="planner-calendar-shell">
                       <FullCalendarView
                         tasks={filteredPlannerTasks}
@@ -1388,225 +1383,227 @@ export default function App() {
                     </div>
                   </div>
 
-                  <section className="planner-dock">
-                    <div className="planner-dock-tabs">
-                      <button
-                        className={`planner-dock-tab ${plannerPanel === "overview" ? "active" : ""}`}
-                        onClick={() => setPlannerPanel("overview")}
-                      >
-                        Overview
-                      </button>
-                      <button
-                        className={`planner-dock-tab ${plannerPanel === "quickAdd" ? "active" : ""}`}
-                        onClick={() => setPlannerPanel("quickAdd")}
-                      >
-                        Quick Add
-                      </button>
-                      <button
-                        className={`planner-dock-tab ${plannerPanel === "autoPlan" ? "active" : ""}`}
-                        onClick={() => setPlannerPanel("autoPlan")}
-                      >
-                        Auto Plan
-                      </button>
-                      <button
-                        className="planner-dock-tab"
-                        onClick={() => setActiveModule("home")}
-                      >
-                        Home Dashboard
-                      </button>
-                    </div>
+                  {plannerDockOpen && (
+                    <section className="planner-dock">
+                      <div className="planner-dock-tabs">
+                        <button
+                          className={`planner-dock-tab ${plannerPanel === "overview" ? "active" : ""}`}
+                          onClick={() => setPlannerPanel("overview")}
+                        >
+                          Overview
+                        </button>
+                        <button
+                          className={`planner-dock-tab ${plannerPanel === "quickAdd" ? "active" : ""}`}
+                          onClick={() => setPlannerPanel("quickAdd")}
+                        >
+                          Quick Add
+                        </button>
+                        <button
+                          className={`planner-dock-tab ${plannerPanel === "autoPlan" ? "active" : ""}`}
+                          onClick={() => setPlannerPanel("autoPlan")}
+                        >
+                          Auto Plan
+                        </button>
+                        <button
+                          className="planner-dock-tab"
+                          onClick={() => setActiveModule("home")}
+                        >
+                          Home Dashboard
+                        </button>
+                      </div>
 
-                    <div className="planner-dock-panel">
-                      {plannerPanel === "overview" && (
-                        <>
-                          <section className="planner-overview planner-overview-side">
-                            <article className="planner-overview-card">
-                              <span>Visible Tasks</span>
-                              <strong>{plannerStats.visible}</strong>
-                            </article>
-                            <article className="planner-overview-card">
-                              <span>Timed Blocks</span>
-                              <strong>{plannerStats.timed}</strong>
-                            </article>
-                            <article className="planner-overview-card">
-                              <span>High Priority</span>
-                              <strong>{plannerStats.high}</strong>
-                            </article>
-                            <article className="planner-overview-card">
-                              <span>Completed</span>
-                              <strong>{plannerStats.completed}</strong>
-                            </article>
-                          </section>
+                      <div className="planner-dock-panel">
+                        {plannerPanel === "overview" && (
+                          <>
+                            <section className="planner-overview planner-overview-side">
+                              <article className="planner-overview-card">
+                                <span>Visible Tasks</span>
+                                <strong>{plannerStats.visible}</strong>
+                              </article>
+                              <article className="planner-overview-card">
+                                <span>Timed Blocks</span>
+                                <strong>{plannerStats.timed}</strong>
+                              </article>
+                              <article className="planner-overview-card">
+                                <span>High Priority</span>
+                                <strong>{plannerStats.high}</strong>
+                              </article>
+                              <article className="planner-overview-card">
+                                <span>Completed</span>
+                                <strong>{plannerStats.completed}</strong>
+                              </article>
+                            </section>
 
-                          <section className="planner-focus-strip planner-focus-strip-side">
-                            <button className="planner-focus-card is-primary" onClick={focusToday}>
-                              <span>Today</span>
-                              <strong>{plannerFocusStats.dueToday}</strong>
-                              <small>tasks scheduled today</small>
-                            </button>
+                            <section className="planner-focus-strip planner-focus-strip-side">
+                              <button className="planner-focus-card is-primary" onClick={focusToday}>
+                                <span>Today</span>
+                                <strong>{plannerFocusStats.dueToday}</strong>
+                                <small>tasks scheduled today</small>
+                              </button>
 
-                            <div className="planner-focus-card">
-                              <span>Overdue</span>
-                              <strong>{plannerFocusStats.overdue}</strong>
-                              <small>need attention</small>
-                            </div>
+                              <div className="planner-focus-card">
+                                <span>Overdue</span>
+                                <strong>{plannerFocusStats.overdue}</strong>
+                                <small>need attention</small>
+                              </div>
 
-                            <div className="planner-focus-card">
-                              <span>Next 7 Days</span>
-                              <strong>{plannerFocusStats.dueThisWeek}</strong>
-                              <small>coming up soon</small>
-                            </div>
-                          </section>
-                        </>
-                      )}
+                              <div className="planner-focus-card">
+                                <span>Next 7 Days</span>
+                                <strong>{plannerFocusStats.dueThisWeek}</strong>
+                                <small>coming up soon</small>
+                              </div>
+                            </section>
+                          </>
+                        )}
 
-                      {plannerPanel === "quickAdd" && (
+                        {plannerPanel === "quickAdd" && (
                           <section className="planner-quick-add planner-quick-add-side">
                             <div className="planner-quick-add-copy">
                               <span className="planner-quick-add-kicker">Quick Add</span>
                               <h3>Capture a task fast</h3>
                             </div>
 
-                          <div className="planner-quick-add-grid planner-quick-add-grid-side">
-                            <input
-                              className="planner-quick-add-title"
-                              placeholder="What needs to get done?"
-                              value={quickAddTitle}
-                              onChange={(e) => setQuickAddTitle(e.target.value)}
-                              onKeyDown={(e) => {
-                                if (e.key === "Enter") {
-                                  e.preventDefault();
-                                  handleQuickAddSubmit();
-                                }
-                              }}
-                            />
-
-                            <input
-                              type="date"
-                              value={quickAddDate}
-                              onChange={(e) => setQuickAddDate(e.target.value)}
-                            />
-
-                            <label className="checkbox-row planner-quick-add-toggle">
+                            <div className="planner-quick-add-grid planner-quick-add-grid-side">
                               <input
-                                type="checkbox"
-                                checked={quickAddTimed}
-                                onChange={(e) => setQuickAddTimed(e.target.checked)}
+                                className="planner-quick-add-title"
+                                placeholder="What needs to get done?"
+                                value={quickAddTitle}
+                                onChange={(e) => setQuickAddTitle(e.target.value)}
+                                onKeyDown={(e) => {
+                                  if (e.key === "Enter") {
+                                    e.preventDefault();
+                                    handleQuickAddSubmit();
+                                  }
+                                }}
                               />
-                              Timed
-                            </label>
 
-                            {quickAddTimed && (
-                              <>
+                              <input
+                                type="date"
+                                value={quickAddDate}
+                                onChange={(e) => setQuickAddDate(e.target.value)}
+                              />
+
+                              <label className="checkbox-row planner-quick-add-toggle">
                                 <input
-                                  type="time"
-                                  value={quickAddStartTime}
-                                  onChange={(e) => setQuickAddStartTime(e.target.value)}
+                                  type="checkbox"
+                                  checked={quickAddTimed}
+                                  onChange={(e) => setQuickAddTimed(e.target.checked)}
                                 />
-                                <input
-                                  type="time"
-                                  value={quickAddEndTime}
-                                  onChange={(e) => setQuickAddEndTime(e.target.value)}
-                                />
-                              </>
-                            )}
+                                Timed
+                              </label>
 
-                            <select
-                              value={quickAddCategory}
-                              onChange={(e) => setQuickAddCategory(e.target.value)}
-                            >
-                              <option value="school">School</option>
-                              <option value="work">Work</option>
-                              <option value="personal">Personal</option>
-                              <option value="health">Health</option>
-                              <option value="errands">Errands</option>
-                              <option value="other">Other</option>
-                            </select>
+                              {quickAddTimed && (
+                                <>
+                                  <input
+                                    type="time"
+                                    value={quickAddStartTime}
+                                    onChange={(e) => setQuickAddStartTime(e.target.value)}
+                                  />
+                                  <input
+                                    type="time"
+                                    value={quickAddEndTime}
+                                    onChange={(e) => setQuickAddEndTime(e.target.value)}
+                                  />
+                                </>
+                              )}
 
-                            <select
-                              value={quickAddPriority}
-                              onChange={(e) => setQuickAddPriority(e.target.value)}
-                            >
-                              <option value="high">High</option>
-                              <option value="medium">Medium</option>
-                              <option value="low">Low</option>
-                            </select>
+                              <select
+                                value={quickAddCategory}
+                                onChange={(e) => setQuickAddCategory(e.target.value)}
+                              >
+                                <option value="school">School</option>
+                                <option value="work">Work</option>
+                                <option value="personal">Personal</option>
+                                <option value="health">Health</option>
+                                <option value="errands">Errands</option>
+                                <option value="other">Other</option>
+                              </select>
 
-                            <button
-                              className="btn primary planner-quick-add-button"
-                              onClick={handleQuickAddSubmit}
-                              disabled={quickAddSaving}
-                            >
-                              {quickAddSaving ? "Adding..." : "Add"}
-                            </button>
-                          </div>
-                        </section>
-                      )}
+                              <select
+                                value={quickAddPriority}
+                                onChange={(e) => setQuickAddPriority(e.target.value)}
+                              >
+                                <option value="high">High</option>
+                                <option value="medium">Medium</option>
+                                <option value="low">Low</option>
+                              </select>
 
-                      {plannerPanel === "autoPlan" && (
-                        <section className="planner-plan-board">
-                          <div className="planner-plan-header">
-                            <div>
-                              <span className="planner-quick-add-kicker">Auto Plan</span>
-                              <h3>Suggested schedule for today</h3>
-                              <p>
-                                DayLy is placing overdue, due-today, and unscheduled work into open
-                                time slots.
-                              </p>
+                              <button
+                                className="btn primary planner-quick-add-button"
+                                onClick={handleQuickAddSubmit}
+                                disabled={quickAddSaving}
+                              >
+                                {quickAddSaving ? "Adding..." : "Add"}
+                              </button>
                             </div>
-                            <button
-                              className="btn primary"
-                              onClick={handleApplyPlanMyDay}
-                              disabled={applyingPlan || !todayPlanSuggestions.length}
-                            >
-                              {applyingPlan ? "Applying..." : "Apply Plan"}
-                            </button>
-                          </div>
+                          </section>
+                        )}
 
-                          <div className="planner-plan-list">
-                            {todayPlanSuggestions.length ? (
-                              todayPlanSuggestions.map((suggestion) => (
-                                <article key={suggestion.task.id} className="planner-plan-item">
-                                  <div className="planner-plan-time">
-                                    {suggestion.start.toLocaleTimeString([], {
-                                      hour: "numeric",
-                                      minute: "2-digit",
-                                    })}{" "}
-                                    -{" "}
-                                    {suggestion.end.toLocaleTimeString([], {
-                                      hour: "numeric",
-                                      minute: "2-digit",
-                                    })}
-                                  </div>
-                                  <div className="planner-plan-content">
-                                    <div className="planner-plan-title">{suggestion.task.title}</div>
-                                    <div className="planner-plan-meta">
-                                      <span className={`workflow-badge workflow-${suggestion.bucket}`}>
-                                        {formatWorkflowBucketLabel(suggestion.bucket)}
-                                      </span>
-                                      <span className={`planner-priority priority-${suggestion.task.priority || "medium"}`}>
-                                        {suggestion.task.priority || "medium"}
-                                      </span>
-                                      <span className="planner-plan-window">
-                                        {suggestion.preferredWindow === "any"
-                                          ? "Any time"
-                                          : suggestion.preferredWindow}
-                                      </span>
-                                    </div>
-                                  </div>
-                                </article>
-                              ))
-                            ) : (
-                              <div className="planner-agenda-empty">
-                                No smart scheduling suggestions right now. Add unscheduled work with
-                                duration estimates to generate a daily plan.
+                        {plannerPanel === "autoPlan" && (
+                          <section className="planner-plan-board">
+                            <div className="planner-plan-header">
+                              <div>
+                                <span className="planner-quick-add-kicker">Auto Plan</span>
+                                <h3>Suggested schedule for today</h3>
+                                <p>
+                                  DayLy is placing overdue, due-today, and unscheduled work into open
+                                  time slots.
+                                </p>
                               </div>
-                            )}
-                          </div>
-                        </section>
-                      )}
-                    </div>
-                  </section>
+                              <button
+                                className="btn primary"
+                                onClick={handleApplyPlanMyDay}
+                                disabled={applyingPlan || !todayPlanSuggestions.length}
+                              >
+                                {applyingPlan ? "Applying..." : "Apply Plan"}
+                              </button>
+                            </div>
+
+                            <div className="planner-plan-list">
+                              {todayPlanSuggestions.length ? (
+                                todayPlanSuggestions.map((suggestion) => (
+                                  <article key={suggestion.task.id} className="planner-plan-item">
+                                    <div className="planner-plan-time">
+                                      {suggestion.start.toLocaleTimeString([], {
+                                        hour: "numeric",
+                                        minute: "2-digit",
+                                      })}{" "}
+                                      -{" "}
+                                      {suggestion.end.toLocaleTimeString([], {
+                                        hour: "numeric",
+                                        minute: "2-digit",
+                                      })}
+                                    </div>
+                                    <div className="planner-plan-content">
+                                      <div className="planner-plan-title">{suggestion.task.title}</div>
+                                      <div className="planner-plan-meta">
+                                        <span className={`workflow-badge workflow-${suggestion.bucket}`}>
+                                          {formatWorkflowBucketLabel(suggestion.bucket)}
+                                        </span>
+                                        <span className={`planner-priority priority-${suggestion.task.priority || "medium"}`}>
+                                          {suggestion.task.priority || "medium"}
+                                        </span>
+                                        <span className="planner-plan-window">
+                                          {suggestion.preferredWindow === "any"
+                                            ? "Any time"
+                                            : suggestion.preferredWindow}
+                                        </span>
+                                      </div>
+                                    </div>
+                                  </article>
+                                ))
+                              ) : (
+                                <div className="planner-agenda-empty">
+                                  No smart scheduling suggestions right now. Add unscheduled work with
+                                  duration estimates to generate a daily plan.
+                                </div>
+                              )}
+                            </div>
+                          </section>
+                        )}
+                      </div>
+                    </section>
+                  )}
                 </>
               ) : (
                 <ProjectKanbanBoard

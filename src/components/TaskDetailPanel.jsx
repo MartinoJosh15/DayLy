@@ -19,6 +19,14 @@ const TIME_WINDOW_OPTIONS = [
   { value: "evening", label: "Evening" },
 ];
 
+function isPlanningFieldMissing(error) {
+  const message = String(error?.message || "").toLowerCase();
+  return (
+    message.includes("estimated_duration_minutes") ||
+    message.includes("preferred_time_window")
+  );
+}
+
 function formatLocalDate(d) {
   return d.toLocaleDateString("en-CA");
 }
@@ -101,22 +109,49 @@ function TaskDetailPanelContent({ task, onClose, onUpdated, onDeleted, onComplet
       endIso = endDt.toISOString();
     }
 
-    const { error: updateErr } = await supabase
+    const payload = {
+      title,
+      category,
+      priority,
+      description,
+      repeat,
+      repeat_days: repeat === "weekly" ? repeatDays : [],
+      estimated_duration_minutes: Number(estimatedDuration) || null,
+      preferred_time_window: preferredTimeWindow,
+      start_time: startIso,
+      end_time: endIso,
+      due_date: dueIso,
+    };
+
+    let { error: updateErr } = await supabase
       .from("tasks")
-      .update({
+      .update(payload)
+      .eq("id", task.id);
+
+    if (updateErr && isPlanningFieldMissing(updateErr)) {
+      const fallbackPayload = {
         title,
         category,
         priority,
         description,
         repeat,
         repeat_days: repeat === "weekly" ? repeatDays : [],
-        estimated_duration_minutes: Number(estimatedDuration) || null,
-        preferred_time_window: preferredTimeWindow,
         start_time: startIso,
         end_time: endIso,
         due_date: dueIso,
-      })
-      .eq("id", task.id);
+      };
+
+      const fallbackResult = await supabase
+        .from("tasks")
+        .update(fallbackPayload)
+        .eq("id", task.id);
+
+      updateErr = fallbackResult.error;
+
+      if (!updateErr) {
+        toast("Task updated, but planning fields are not in Supabase yet.");
+      }
+    }
 
     setSaving(false);
 

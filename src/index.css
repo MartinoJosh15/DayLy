@@ -2645,7 +2645,7 @@ body {
 }
 
 .topbar {
-  padding: 18px 22px;
+  padding: 14px 18px;
   background: rgba(255, 255, 255, 0.7);
   border-bottom: 1px solid rgba(148, 163, 184, 0.16);
 }
@@ -2690,58 +2690,7 @@ body {
   gap: 18px;
   min-height: 0;
   padding: 18px;
-}
-
-.planner-header-grid {
-  display: flex;
-  align-items: stretch;
-  justify-content: space-between;
-  gap: 16px;
-}
-
-.planner-page-title {
-  min-width: 0;
-  padding: 18px 20px;
-  border: 1px solid var(--app-border);
-  border-radius: var(--app-radius-lg);
-  background: var(--app-panel);
-  box-shadow: var(--app-shadow-subtle);
-}
-
-.planner-page-title h2 {
-  margin: 4px 0 0;
-  font-size: 28px;
-  letter-spacing: -0.04em;
-}
-
-.planner-mini-stats {
-  display: grid;
-  grid-template-columns: repeat(3, minmax(120px, 1fr));
-  gap: 12px;
-}
-
-.planner-mini-stat {
-  padding: 16px 18px;
-  border: 1px solid var(--app-border);
-  border-radius: var(--app-radius-lg);
-  background: var(--app-panel);
-  box-shadow: var(--app-shadow-subtle);
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-}
-
-.planner-mini-stat span {
-  font-size: 11px;
-  font-weight: 800;
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
-  color: var(--app-text-muted);
-}
-
-.planner-mini-stat strong {
-  font-size: 28px;
-  line-height: 1;
+  overflow-y: auto;
 }
 
 .planner-workspace {
@@ -2755,8 +2704,8 @@ body {
 .planner-calendar-shell {
   display: block;
   height: auto;
-  min-height: 540px;
-  padding: 14px;
+  min-height: calc(100vh - 165px);
+  padding: 10px;
   border: 1px solid var(--app-border);
   border-radius: 22px;
   background: linear-gradient(180deg, rgba(255, 255, 255, 0.9) 0%, rgba(247, 250, 252, 0.96) 100%);
@@ -2767,9 +2716,28 @@ body {
 .planner-calendar-shell .fc {
   background: #ffffff;
   border-radius: 18px;
-  padding: 12px;
+  padding: 8px;
   height: auto !important;
-  min-height: 720px;
+  min-height: calc(100vh - 185px);
+}
+
+.planner-workspace.with-dock .planner-calendar-shell {
+  min-height: calc(100vh - 420px);
+}
+
+.planner-workspace.with-dock .planner-calendar-shell .fc {
+  min-height: calc(100vh - 440px);
+}
+
+.planner-calendar-shell .fc-scrollgrid {
+  border: 1px solid rgba(226, 232, 240, 0.9);
+  border-radius: 16px;
+  overflow: hidden;
+}
+
+.planner-calendar-shell .fc-scrollgrid-section-header > th,
+.planner-calendar-shell .fc-scrollgrid-section-body > td {
+  border-color: rgba(226, 232, 240, 0.85);
 }
 
 .planner-dock {
@@ -2972,6 +2940,19 @@ body {
   gap: 16px;
 }
 
+.home-primary-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1.3fr) minmax(340px, 0.9fr);
+  gap: 20px;
+  align-items: stretch;
+}
+
+.home-summary-grid-compact {
+  grid-template-columns: minmax(0, 1.15fr) minmax(320px, 0.85fr);
+  margin-bottom: 14px;
+  align-items: stretch;
+}
+
 .workflow-strip {
   display: grid;
   grid-template-columns: repeat(5, minmax(0, 1fr));
@@ -3009,23 +2990,73 @@ body {
 }
 
 .workflow-card.workflow-inbox {
-  background: linear-gradient(180deg, rgba(148, 163, 184, 0.08) 0%, rgba(255, 255, 255, 0.88) 100%);
+  background: linear-gradient(180deg, rgba(148, 163, 184, 0.12) 0%, rgba(255, 255, 255, 0.96) 100%);
 }
 
 .workflow-card.workflow-today {
-  background: linear-gradient(180deg, rgba(21, 94, 239, 0.08) 0%, rgba(255, 255, 255, 0.88) 100%);
+  background: linear-gradient(180deg, rgba(59, 130, 246, 0.16) 0%, rgba(255, 255, 255, 0.96) 100%);
 }
 
 .workflow-card.workflow-upcoming {
-  background: linear-gradient(180deg, rgba(14, 165, 233, 0.08) 0%, rgba(255, 255, 255, 0.88) 100%);
+  background: linear-gradient(180deg, rgba(34, 211, 238, 0.16) 0%, rgba(255, 255, 255, 0.96) 100%);
 }
 
 .workflow-card.workflow-overdue {
-  background: linear-gradient(180deg, rgba(239, 68, 68, 0.08) 0%, rgba(255, 255, 255, 0.88) 100%);
+  background: linear-gradient(180deg, rgba(248, 113, 113, 0.14) 0%, rgba(255, 255, 255, 0.96) 100%);
 }
 
 .workflow-card.workflow-done {
-  background: linear-gradient(180deg, rgba(22, 163, 74, 0.08) 0%, rgba(255, 255, 255, 0.88) 100%);
+  background: linear-gradient(180deg, rgba(74, 222, 128, 0.16) 0%, rgba(255, 255, 255, 0.96) 100%);
+}
+
+.workflow-strip-inline {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  padding-top: 2px;
+  justify-content: flex-start;
+  margin-top: auto;
+}
+
+.workflow-strip-inline .workflow-card {
+  min-width: 0;
+  flex: 0 0 auto;
+  padding: 8px 12px;
+  border-radius: 999px;
+  box-shadow: none;
+  flex-direction: row;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  width: auto;
+  border-color: rgba(148, 163, 184, 0.2);
+}
+
+.workflow-strip-inline .workflow-card-label {
+  font-size: 10px;
+  margin: 0;
+}
+
+.workflow-strip-inline .workflow-card strong {
+  font-size: 14px;
+  letter-spacing: 0;
+}
+
+.workflow-strip-inline .workflow-card span {
+  display: none;
+}
+
+.home-command-surface .surface-header {
+  margin-bottom: 16px;
+}
+
+.home-summary-card {
+  min-height: 140px;
+  justify-content: space-between;
+}
+
+.home-summary-card p {
+  max-width: 32ch;
 }
 
 .home-summary-card {
@@ -3037,7 +3068,7 @@ body {
 
 .home-summary-card-primary {
   background:
-    linear-gradient(180deg, rgba(21, 94, 239, 0.08) 0%, rgba(255, 255, 255, 0.86) 100%);
+    linear-gradient(180deg, rgba(59, 130, 246, 0.14) 0%, rgba(255, 255, 255, 0.94) 100%);
 }
 
 .home-summary-label {
@@ -3066,8 +3097,20 @@ body {
   gap: 20px;
 }
 
+.home-command-surface,
+.home-workspaces-section {
+  padding: 22px;
+}
+
+.home-command-surface {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+}
+
 .home-surface {
   padding: 22px;
+  background: linear-gradient(180deg, #ffffff 0%, #f8fbff 100%);
 }
 
 .surface-header {
@@ -3116,7 +3159,7 @@ body {
 
 .module-card.live {
   border-color: rgba(21, 94, 239, 0.14);
-  background: linear-gradient(180deg, rgba(255, 255, 255, 1) 0%, rgba(247, 250, 255, 1) 100%);
+  background: linear-gradient(180deg, rgba(255, 255, 255, 1) 0%, rgba(242, 248, 255, 1) 100%);
 }
 
 .module-card h3 {
@@ -3131,6 +3174,9 @@ body {
 
 .home-upcoming {
   padding: 22px;
+  height: 100%;
+  display: flex;
+  flex-direction: column;
 }
 
 .home-upcoming-checklist {
@@ -3200,6 +3246,8 @@ body {
 }
 
 .home-secondary-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 20px;
 }
 
@@ -3209,7 +3257,7 @@ body {
 
 .home-panel-overdue {
   background:
-    linear-gradient(180deg, rgba(239, 68, 68, 0.06) 0%, rgba(255, 255, 255, 0.86) 100%);
+    linear-gradient(180deg, rgba(248, 113, 113, 0.1) 0%, rgba(255, 255, 255, 0.94) 100%);
 }
 
 .home-panel-empty,
@@ -3252,6 +3300,10 @@ body {
 .fc-col-header-cell-cushion,
 .fc-daygrid-day-number {
   color: #415166;
+  font-size: 12px;
+  font-weight: 800;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
 }
 
 .fc-timegrid-slot,
@@ -3266,12 +3318,83 @@ body {
   background: rgba(21, 94, 239, 0.04) !important;
 }
 
+.fc .fc-timegrid-axis {
+  width: 72px;
+  background: rgba(248, 250, 252, 0.92);
+}
+
+.fc .fc-timegrid-axis-cushion,
+.fc .fc-timegrid-slot-label-cushion {
+  color: #64748b;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.fc .fc-timegrid-divider {
+  padding: 0;
+}
+
+.fc .fc-timegrid-divider-frame {
+  background: rgba(248, 250, 252, 0.98);
+}
+
+.fc .fc-timegrid-slot-label {
+  vertical-align: top;
+}
+
+.fc .fc-timegrid-slot {
+  height: 2.9rem;
+}
+
 .fc-event {
-  box-shadow: none;
+  border-radius: 12px !important;
+  border: 1px solid rgba(255, 255, 255, 0.4) !important;
+  box-shadow: 0 8px 18px rgba(15, 23, 42, 0.12);
+  padding: 6px 8px !important;
 }
 
 .fc-event:hover {
-  box-shadow: 0 10px 20px rgba(15, 23, 42, 0.12);
+  box-shadow: 0 14px 26px rgba(15, 23, 42, 0.16);
+}
+
+.fc-timegrid-event .fc-event-main {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.fc-timegrid-event .fc-event-time {
+  font-size: 11px;
+  font-weight: 800;
+  line-height: 1.1;
+  opacity: 0.85;
+}
+
+.fc-timegrid-event .fc-event-title {
+  font-size: 12px;
+  font-weight: 700;
+  line-height: 1.25;
+}
+
+.fc-daygrid-event {
+  border-radius: 10px !important;
+  padding: 4px 6px !important;
+}
+
+.fc .fc-daygrid-day-number {
+  padding: 10px 12px 0;
+}
+
+.fc .fc-col-header-cell {
+  background: rgba(248, 250, 252, 0.92);
+}
+
+.fc .fc-col-header-cell-cushion {
+  padding: 10px 8px;
+}
+
+.fc .fc-daygrid-day-top {
+  justify-content: flex-end;
 }
 
 .kanban-grid {
@@ -3326,8 +3449,6 @@ body.dark .main,
 body.dark .home-header,
 body.dark .home-surface,
 body.dark .home-summary-card,
-body.dark .planner-page-title,
-body.dark .planner-mini-stat,
 body.dark .planner-calendar-shell,
 body.dark .planner-dock,
 body.dark .planner-overview-card,
@@ -3372,7 +3493,6 @@ body.dark .home-panel-meta,
 body.dark .home-upcoming-count,
 body.dark .home-upcoming-footer,
 body.dark .workflow-card span,
-body.dark .planner-mini-stat span,
 body.dark .planner-focus-card small,
 body.dark .kanban-summary,
 body.dark .kanban-drag-hint {
@@ -3470,6 +3590,10 @@ body.dark .fc-timegrid-axis-cushion {
   color: #bdc9d9;
 }
 
+body.dark .planner-calendar-shell .fc-scrollgrid {
+  border-color: rgba(51, 65, 85, 0.92);
+}
+
 body.dark .fc-timegrid-slot,
 body.dark .fc-timegrid-slot-minor,
 body.dark .fc-theme-standard td,
@@ -3477,16 +3601,22 @@ body.dark .fc-theme-standard th {
   border-color: rgba(51, 65, 85, 0.92);
 }
 
+body.dark .fc .fc-col-header-cell,
+body.dark .fc .fc-timegrid-axis,
+body.dark .fc .fc-timegrid-divider-frame {
+  background: rgba(15, 26, 45, 0.96);
+}
+
+body.dark .fc .fc-timegrid-slot-label-cushion {
+  color: #9fb0c8;
+}
+
 @media (max-width: 1180px) {
+  .home-primary-grid,
   .home-workspace-grid,
-  .home-secondary-grid,
-  .planner-header-grid {
+  .home-secondary-grid {
     grid-template-columns: 1fr;
     display: grid;
-  }
-
-  .planner-mini-stats {
-    grid-template-columns: repeat(3, minmax(0, 1fr));
   }
 }
 
@@ -3504,7 +3634,6 @@ body.dark .fc-theme-standard th {
   .workflow-strip,
   .module-grid,
   .home-secondary-grid,
-  .planner-mini-stats,
   .planner-overview-side,
   .planner-focus-strip-side {
     grid-template-columns: 1fr;

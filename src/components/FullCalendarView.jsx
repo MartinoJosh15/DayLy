@@ -39,7 +39,9 @@ function normalizeToLocalDate(datePart, timePart) {
   }
 
   if (!timePart) {
-    const d = new Date(datePart);
+    const isoDate = String(datePart).slice(0, 10);
+    const [year, month, day] = isoDate.split("-").map(Number);
+    const d = new Date(year, month - 1, day);
     return isNaN(d) ? null : d;
   }
 
@@ -177,6 +179,8 @@ export default function FullCalendarView({
       slotMinTime="00:00:00"
       slotMaxTime="24:00:00"
       slotDuration="00:15:00"
+      slotLabelInterval="01:00:00"
+      dayHeaderFormat={{ weekday: "short", month: "numeric", day: "numeric" }}
       allDaySlot
       events={events}
       eventDidMount={(info) => {
