@@ -55,6 +55,41 @@ const TIME_WINDOW_RANGES = {
   evening: { startHour: 17, endHour: 22 },
 };
 
+function getCanvasScanUrl() {
+  const explicitUrl = import.meta.env.VITE_CANVAS_SCAN_URL?.trim();
+  if (explicitUrl) return explicitUrl;
+
+  if (import.meta.env.DEV) {
+    return "/api/canvas-scan";
+  }
+
+  const supabaseUrl = import.meta.env.VITE_SUPABASE_URL?.trim();
+  if (supabaseUrl) {
+    return `${supabaseUrl}/functions/v1/canvas-scan`;
+  }
+
+  return "/api/canvas-scan";
+}
+
+function getCanvasScanHeaders() {
+  const headers = {
+    "Content-Type": "application/json",
+  };
+
+  const explicitUrl = import.meta.env.VITE_CANVAS_SCAN_URL?.trim();
+  const supabaseUrl = import.meta.env.VITE_SUPABASE_URL?.trim();
+  const anonKey = import.meta.env.VITE_SUPABASE_ANON_KEY?.trim();
+  const usingSupabaseFunction =
+    Boolean(explicitUrl) || (!import.meta.env.DEV && Boolean(supabaseUrl));
+
+  if (usingSupabaseFunction && anonKey) {
+    headers.apikey = anonKey;
+    headers.Authorization = `Bearer ${anonKey}`;
+  }
+
+  return headers;
+}
+
 async function readJsonResponse(response) {
   const contentType = response.headers.get("content-type") || "";
   const rawText = await response.text();
@@ -68,7 +103,7 @@ async function readJsonResponse(response) {
       throw new Error(
         import.meta.env.DEV
           ? "Canvas scan endpoint returned HTML instead of JSON. Make sure the app is running with `npm run dev`."
-          : "Canvas scan is not available in this deployment yet. The current /api/canvas-scan route only exists in local dev."
+          : "Canvas scan endpoint is unavailable. Deploy the Supabase `canvas-scan` edge function or set `VITE_CANVAS_SCAN_URL`."
       );
     }
 
@@ -853,11 +888,9 @@ export default function App() {
     setCanvasScanning(true);
 
     try {
-      const response = await fetch("/api/canvas-scan", {
+      const response = await fetch(getCanvasScanUrl(), {
         method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
+        headers: getCanvasScanHeaders(),
         body: JSON.stringify({
           days: 14,
           includeOverdue: false,

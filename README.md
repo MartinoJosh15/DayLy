@@ -25,9 +25,12 @@ Create a local `.env.local` with:
 ```bash
 VITE_SUPABASE_URL=your-supabase-url
 VITE_SUPABASE_ANON_KEY=your-supabase-anon-key
+VITE_CANVAS_SCAN_URL=
 ```
 
 An example file is included at [.env.example](C:/Users/marti/OneDrive/Documents/Task_Manager/Dayly/.env.example).
+
+`VITE_CANVAS_SCAN_URL` is optional. Leave it blank to use the local Vite route in development and the default Supabase Edge Function URL in production.
 
 ## AWS Deployment
 
@@ -58,11 +61,33 @@ If `day-ly.net` is in Route 53:
 4. Assign the app to `app.day-ly.net`
 5. Let Amplify create the DNS records in Route 53 automatically
 
-### Important Production Note
+## Canvas Scan In Production
 
-The current Canvas scan endpoint is implemented as Vite dev middleware in [vite.config.js](C:/Users/marti/OneDrive/Documents/Task_Manager/Dayly/vite.config.js). That route works in local development, but it will not run in Amplify production hosting.
+Canvas scan now has a production path through a Supabase Edge Function at [supabase/functions/canvas-scan/index.ts](C:/Users/marti/OneDrive/Documents/Task_Manager/Dayly/supabase/functions/canvas-scan/index.ts).
 
-To support Canvas scanning in production later, move that logic to:
+Local development still supports the Vite middleware route in [vite.config.js](C:/Users/marti/OneDrive/Documents/Task_Manager/Dayly/vite.config.js), but deployed apps should use the Edge Function.
 
-- AWS Lambda + API Gateway, or
-- another backend service
+### Required Supabase Function Secrets
+
+Add these secrets in Supabase before deploying the function:
+
+```bash
+SUPABASE_URL=your-supabase-url
+SUPABASE_SERVICE_ROLE_KEY=your-service-role-key
+CANVAS_API_KEY=your-canvas-api-token
+CANVAS_BASE_URL=https://canvas.jmu.edu/api/v1
+```
+
+### Deploy The Function
+
+```bash
+supabase functions deploy canvas-scan --no-verify-jwt
+```
+
+If your frontend uses the same Supabase project as its main database, no extra client config is required in production.
+
+If you want to point the app at a different function host, set:
+
+```bash
+VITE_CANVAS_SCAN_URL=https://your-project-id.supabase.co/functions/v1/canvas-scan
+```
