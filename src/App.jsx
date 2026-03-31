@@ -55,6 +55,33 @@ const TIME_WINDOW_RANGES = {
   evening: { startHour: 17, endHour: 22 },
 };
 
+async function readJsonResponse(response) {
+  const contentType = response.headers.get("content-type") || "";
+  const rawText = await response.text();
+
+  if (!rawText) return {};
+
+  if (!contentType.includes("application/json")) {
+    const preview = rawText.slice(0, 120).trim().toLowerCase();
+
+    if (preview.startsWith("<!doctype") || preview.startsWith("<html")) {
+      throw new Error(
+        import.meta.env.DEV
+          ? "Canvas scan endpoint returned HTML instead of JSON. Make sure the app is running with `npm run dev`."
+          : "Canvas scan is not available in this deployment yet. The current /api/canvas-scan route only exists in local dev."
+      );
+    }
+
+    throw new Error("Canvas scan returned an unexpected response format.");
+  }
+
+  try {
+    return JSON.parse(rawText);
+  } catch {
+    throw new Error("Canvas scan returned invalid JSON.");
+  }
+}
+
 function normalizeKanbanStatus(value) {
   if (value === "todo" || value === "in_progress" || value === "done") {
     return value;
@@ -840,7 +867,7 @@ export default function App() {
         }),
       });
 
-      const result = await response.json();
+      const result = await readJsonResponse(response);
 
       if (!response.ok || !result.ok) {
         throw new Error(result.error || "Canvas scan failed.");
