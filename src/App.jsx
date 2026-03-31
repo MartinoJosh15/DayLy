@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { Toaster, toast } from "react-hot-toast";
-import { supabase } from "./utils/supabase";
+import { supabase, supabaseConfigError } from "./utils/supabase";
 
 import FullCalendarView from "./components/FullCalendarView";
 import AddTaskModal from "./components/AddTaskModal";
@@ -266,6 +266,7 @@ export default function App() {
 
   const isPlannerModule = activeModule === "planner";
   const isProjectsModule = activeModule === "projects";
+  const showDeploymentConfig = Boolean(supabaseConfigError);
 
   useEffect(() => {
     document.body.classList.toggle("dark", theme === "dark");
@@ -276,6 +277,8 @@ export default function App() {
   }
 
   async function fetchTasks() {
+    if (!supabase) return;
+
     const { data, error } = await supabase
       .from("tasks")
       .select("*")
@@ -953,7 +956,40 @@ export default function App() {
     <>
       <Toaster position="top-right" />
 
-      {activeModule === "home" ? (
+      {showDeploymentConfig ? (
+        <div className="home-page">
+          <section className="home-header">
+            <div className="home-brand">
+              <img src={logo} alt="DayLy logo" className="home-logo" />
+              <div>
+                <div className="home-kicker">Deployment Setup Required</div>
+                <h1>DayLy</h1>
+                <p className="home-header-copy">
+                  The app loaded, but Supabase environment variables are missing in this deployment.
+                </p>
+              </div>
+            </div>
+          </section>
+
+          <section className="home-surface home-panel">
+            <div className="surface-header">
+              <div>
+                <div className="home-kicker">Fix In Amplify</div>
+                <h2>Set your environment variables</h2>
+              </div>
+            </div>
+
+            <div className="error-banner">{supabaseConfigError}</div>
+
+            <div className="deployment-help">
+              <p>Add these environment variables in Amplify Hosting:</p>
+              <code>VITE_SUPABASE_URL</code>
+              <code>VITE_SUPABASE_ANON_KEY</code>
+              <p>Then redeploy the app.</p>
+            </div>
+          </section>
+        </div>
+      ) : activeModule === "home" ? (
         <div className="home-page">
           <header className="home-header">
             <div className="home-brand">
