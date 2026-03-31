@@ -1,0 +1,4 @@
+project_id = "dayly"
+
+[functions.canvas-scan]
+verify_jwt = false
