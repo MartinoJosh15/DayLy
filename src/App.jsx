@@ -54,6 +54,44 @@ const TIME_WINDOW_RANGES = {
   afternoon: { startHour: 12, endHour: 17 },
   evening: { startHour: 17, endHour: 22 },
 };
+const PLANNING_BUCKET_RANK = {
+  overdue: 0,
+  today: 1,
+  inbox: 2,
+  upcoming: 3,
+  done: 4,
+};
+const PLANNING_PRIORITY_RANK = {
+  high: 0,
+  medium: 1,
+  low: 2,
+};
+
+function getSupabaseFunctionHeaders() {
+  const headers = {
+    "Content-Type": "application/json",
+  };
+  const anonKey = import.meta.env.VITE_SUPABASE_ANON_KEY?.trim();
+
+  if (anonKey) {
+    headers.apikey = anonKey;
+    headers.Authorization = `Bearer ${anonKey}`;
+  }
+
+  return headers;
+}
+
+function getAiPlanUrl() {
+  const explicitUrl = import.meta.env.VITE_AI_PLAN_URL?.trim();
+  if (explicitUrl) return explicitUrl;
+
+  const supabaseUrl = import.meta.env.VITE_SUPABASE_URL?.trim();
+  if (supabaseUrl) {
+    return `${supabaseUrl}/functions/v1/ai-plan`;
+  }
+
+  return "/api/ai-plan";
+}
 
 function getCanvasScanUrl() {
   const explicitUrl = import.meta.env.VITE_CANVAS_SCAN_URL?.trim();
@@ -72,24 +110,22 @@ function getCanvasScanUrl() {
 }
 
 function getCanvasScanHeaders() {
-  const headers = {
-    "Content-Type": "application/json",
-  };
+  const headers = getSupabaseFunctionHeaders();
 
   const explicitUrl = import.meta.env.VITE_CANVAS_SCAN_URL?.trim();
   const supabaseUrl = import.meta.env.VITE_SUPABASE_URL?.trim();
-  const anonKey = import.meta.env.VITE_SUPABASE_ANON_KEY?.trim();
   const usingSupabaseFunction =
     Boolean(explicitUrl) || (!import.meta.env.DEV && Boolean(supabaseUrl));
 
-  if (usingSupabaseFunction && anonKey) {
-    headers.apikey = anonKey;
-    headers.Authorization = `Bearer ${anonKey}`;
+  if (!usingSupabaseFunction) {
+    return {
+      "Content-Type": "application/json",
+    };
   }
 
   return headers;
 }
-async function readJsonResponse(response) {
+async function readJsonResponse(response, label = "Request") {
   const contentType = response.headers.get("content-type") || "";
   const rawText = await response.text();
 
@@ -101,18 +137,18 @@ async function readJsonResponse(response) {
     if (preview.startsWith("<!doctype") || preview.startsWith("<html")) {
       throw new Error(
         import.meta.env.DEV
-          ? "Canvas scan endpoint returned HTML instead of JSON. Make sure the app is running with `npm run dev`."
-          : "Canvas scan endpoint is unavailable. Deploy the Supabase `canvas-scan` edge function or set `VITE_CANVAS_SCAN_URL`."
+          ? `${label} endpoint returned HTML instead of JSON. Make sure the app is running with the expected backend route.`
+          : `${label} endpoint is unavailable. Deploy the matching Supabase edge function and set the correct app URL.`
       );
     }
 
-    throw new Error("Canvas scan returned an unexpected response format.");
+    throw new Error(`${label} returned an unexpected response format.`);
   }
 
   try {
     return JSON.parse(rawText);
   } catch {
-    throw new Error("Canvas scan returned invalid JSON.");
+    throw new Error(`${label} returned invalid JSON.`);
   }
 }
 
@@ -199,6 +235,131 @@ function formatLocalDateInput(date) {
   return `${year}-${month}-${day}`;
 }
 
+function getPlanningPriorityRank(priority) {
+  return PLANNING_PRIORITY_RANK[priority || "medium"] ?? 1;
+}
+
+function getPlanningBucketRank(bucket) {
+  return PLANNING_BUCKET_RANK[bucket] ?? 5;
+}
+
+function getScheduledBlocksForDate(tasks, targetDate) {
+  const dayStart = startOfDay(targetDate);
+  const dayEnd = endOfDay(targetDate);
+
+  return tasks
+    .filter((task) => {
+      if (!task.start_time || !task.end_time) return false;
+      const start = new Date(task.start_time);
+      return start >= dayStart && start <= dayEnd;
+    })
+    .map((task) => ({
+      start: new Date(task.start_time),
+      end: new Date(task.end_time),
+    }))
+    .sort((a, b) => a.start - b.start);
+}
+
+function getAutoPlanCandidates(tasks, now, { includeUpcoming = false } = {}) {
+  return tasks
+    .filter((task) => {
+      if (task.completed_at) return false;
+      if (!isDashboardActionableTask(task)) return false;
+      if (task.start_time && task.end_time) return false;
+      const bucket = getTaskWorkflowBucket(task, now);
+      return (
+        bucket === "overdue" ||
+        bucket === "today" ||
+        bucket === "inbox" ||
+        (includeUpcoming && bucket === "upcoming")
+      );
+    })
+    .sort((a, b) => {
+      const bucketDiff =
+        getPlanningBucketRank(getTaskWorkflowBucket(a, now)) -
+        getPlanningBucketRank(getTaskWorkflowBucket(b, now));
+      if (bucketDiff !== 0) return bucketDiff;
+
+      const priorityDiff = getPlanningPriorityRank(a.priority) - getPlanningPriorityRank(b.priority);
+      if (priorityDiff !== 0) return priorityDiff;
+
+      const aTime = getTaskSourceDate(a)?.getTime() ?? Number.MAX_SAFE_INTEGER;
+      const bTime = getTaskSourceDate(b)?.getTime() ?? Number.MAX_SAFE_INTEGER;
+      return aTime - bTime;
+    });
+}
+
+function buildSmartPlanSuggestions(tasks, now = new Date()) {
+  const scheduledBlocks = getScheduledBlocksForDate(tasks, now);
+  const candidates = getAutoPlanCandidates(tasks, now);
+  const workingBlocks = [...scheduledBlocks];
+  const suggestions = [];
+
+  for (const task of candidates) {
+    const preferredWindow = task.preferred_time_window || "any";
+    const { startHour, endHour } = TIME_WINDOW_RANGES[preferredWindow] || TIME_WINDOW_RANGES.any;
+    const rangeStart = setDateWithHour(now, startHour);
+    const rangeEnd = setDateWithHour(now, endHour);
+    const durationMinutes = task.estimated_duration_minutes || 60;
+
+    const slot = findNextAvailableSlot(workingBlocks, rangeStart, rangeEnd, durationMinutes);
+    if (!slot) continue;
+
+    suggestions.push({
+      task,
+      start: slot.start,
+      end: slot.end,
+      bucket: getTaskWorkflowBucket(task, now),
+      preferredWindow,
+      rationale: "",
+    });
+
+    workingBlocks.push({ start: slot.start, end: slot.end });
+    workingBlocks.sort((a, b) => a.start - b.start);
+
+    if (suggestions.length >= 5) break;
+  }
+
+  return suggestions;
+}
+
+function buildPlanningWindows(tasks, now = new Date()) {
+  const scheduledBlocks = getScheduledBlocksForDate(tasks, now);
+  const planningStart = new Date(Math.max(setDateWithHour(now, 8).getTime(), now.getTime()));
+  const planningEnd = setDateWithHour(now, 22);
+
+  if (planningStart >= planningEnd) return [];
+
+  const windows = [];
+  let cursor = new Date(planningStart);
+
+  for (const block of scheduledBlocks) {
+    if (block.end <= cursor) continue;
+    if (block.start >= planningEnd) break;
+
+    const windowEnd = new Date(Math.min(block.start.getTime(), planningEnd.getTime()));
+    if (windowEnd > cursor) {
+      windows.push({
+        start: new Date(cursor),
+        end: windowEnd,
+      });
+    }
+
+    if (block.end > cursor) {
+      cursor = new Date(block.end);
+    }
+  }
+
+  if (cursor < planningEnd) {
+    windows.push({
+      start: new Date(cursor),
+      end: new Date(planningEnd),
+    });
+  }
+
+  return windows.filter((window) => window.end > window.start);
+}
+
 function findNextAvailableSlot(events, rangeStart, rangeEnd, durationMinutes) {
   let cursor = new Date(rangeStart);
 
@@ -256,6 +417,11 @@ export default function App() {
   const [quickAddTimed, setQuickAddTimed] = useState(true);
   const [quickAddSaving, setQuickAddSaving] = useState(false);
   const [applyingPlan, setApplyingPlan] = useState(false);
+  const [planMode, setPlanMode] = useState("smart");
+  const [aiPlanning, setAiPlanning] = useState(false);
+  const [aiPlanSummary, setAiPlanSummary] = useState("");
+  const [aiPlanError, setAiPlanError] = useState("");
+  const [aiPlanSuggestions, setAiPlanSuggestions] = useState([]);
 
   const [visiblePriorities, setVisiblePriorities] = useState({
     high: true,
@@ -299,6 +465,12 @@ export default function App() {
 
     return () => clearTimeout(timer);
   }, []);
+
+  useEffect(() => {
+    setAiPlanSuggestions([]);
+    setAiPlanSummary("");
+    setAiPlanError("");
+  }, [tasks]);
 
   const basePlannerTasks = useMemo(() => {
     const query = plannerSearch.trim().toLowerCase();
@@ -426,86 +598,45 @@ export default function App() {
     return grouped;
   }, [tasks]);
 
-  const todayPlanSuggestions = useMemo(() => {
+  const todayPlanSuggestions = useMemo(() => buildSmartPlanSuggestions(tasks), [tasks]);
+
+  const aiPlanningContext = useMemo(() => {
     const now = new Date();
-    const dayStart = startOfDay(now);
-    const dayEnd = endOfDay(now);
-    const scheduledBlocks = tasks
-      .filter((task) => {
-        if (!task.start_time || !task.end_time) return false;
-        const start = new Date(task.start_time);
-        return start >= dayStart && start <= dayEnd;
-      })
+    const windows = buildPlanningWindows(tasks, now);
+    const candidates = getAutoPlanCandidates(tasks, now, { includeUpcoming: true })
+      .slice(0, 12)
       .map((task) => ({
-        start: new Date(task.start_time),
-        end: new Date(task.end_time),
-      }))
-      .sort((a, b) => a.start - b.start);
-
-    const candidates = tasks
-      .filter((task) => {
-        if (task.completed_at) return false;
-        if (!isDashboardActionableTask(task)) return false;
-        if (task.start_time && task.end_time) return false;
-        const bucket = getTaskWorkflowBucket(task, now);
-        return bucket === "overdue" || bucket === "today" || bucket === "inbox";
-      })
-      .sort((a, b) => {
-        const bucketRank = {
-          overdue: 0,
-          today: 1,
-          inbox: 2,
-          upcoming: 3,
-          done: 4,
-        };
-        const priorityRank = {
-          high: 0,
-          medium: 1,
-          low: 2,
-        };
-        const bucketDiff =
-          bucketRank[getTaskWorkflowBucket(a, now)] - bucketRank[getTaskWorkflowBucket(b, now)];
-        if (bucketDiff !== 0) return bucketDiff;
-
-        const priorityDiff =
-          (priorityRank[a.priority || "medium"] ?? 1) - (priorityRank[b.priority || "medium"] ?? 1);
-        if (priorityDiff !== 0) return priorityDiff;
-
-        const aTime = getTaskSourceDate(a)?.getTime() ?? Number.MAX_SAFE_INTEGER;
-        const bTime = getTaskSourceDate(b)?.getTime() ?? Number.MAX_SAFE_INTEGER;
-        return aTime - bTime;
-      });
-
-    const workingBlocks = [...scheduledBlocks];
-    const suggestions = [];
-
-    for (const task of candidates) {
-      const preferredWindow = task.preferred_time_window || "any";
-      const { startHour, endHour } = TIME_WINDOW_RANGES[preferredWindow] || TIME_WINDOW_RANGES.any;
-      const rangeStart = setDateWithHour(now, startHour);
-      const rangeEnd = setDateWithHour(now, endHour);
-      const durationMinutes = task.estimated_duration_minutes || 60;
-
-      const slot = findNextAvailableSlot(workingBlocks, rangeStart, rangeEnd, durationMinutes);
-      if (!slot) continue;
-
-      const suggestion = {
-        task,
-        start: slot.start,
-        end: slot.end,
+        id: String(task.id),
+        title: task.title || "Untitled task",
+        category: task.category || "other",
+        priority: task.priority || "medium",
         bucket: getTaskWorkflowBucket(task, now),
-        preferredWindow,
-      };
+        estimatedDurationMinutes: task.estimated_duration_minutes || 60,
+        preferredTimeWindow: task.preferred_time_window || "any",
+        dueDate: task.due_date || null,
+        description: String(task.description || "").slice(0, 400),
+      }));
 
-      suggestions.push(suggestion);
-      workingBlocks.push({ start: slot.start, end: slot.end });
-      workingBlocks.sort((a, b) => a.start - b.start);
-
-      if (suggestions.length >= 5) break;
-    }
-
-    return suggestions;
+    return {
+      timezone: Intl.DateTimeFormat().resolvedOptions().timeZone || "America/New_York",
+      now: now.toISOString(),
+      maxSuggestions: 5,
+      freeWindows: windows.map((window) => ({
+        start: window.start.toISOString(),
+        end: window.end.toISOString(),
+        label: `${window.start.toLocaleTimeString([], {
+          hour: "numeric",
+          minute: "2-digit",
+        })} - ${window.end.toLocaleTimeString([], {
+          hour: "numeric",
+          minute: "2-digit",
+        })}`,
+      })),
+      tasks: candidates,
+    };
   }, [tasks]);
+
+  const activePlanSuggestions = planMode === "ai" ? aiPlanSuggestions : todayPlanSuggestions;
 
   const workflowSummaryCards = useMemo(() => {
     return [
@@ -899,7 +1030,7 @@ export default function App() {
         }),
       });
 
-      const result = await readJsonResponse(response);
+      const result = await readJsonResponse(response, "Canvas scan");
 
       if (!response.ok || !result.ok) {
         throw new Error(result.error || "Canvas scan failed.");
@@ -919,13 +1050,83 @@ export default function App() {
     }
   }
 
-  async function handleApplyPlanMyDay() {
-    if (!todayPlanSuggestions.length || applyingPlan) return;
+  async function handleGenerateAiPlan() {
+    if (aiPlanning) return;
+
+    if (!aiPlanningContext.tasks.length) {
+      toast("Add a few unscheduled tasks before asking AI to build a plan.");
+      return;
+    }
+
+    if (!aiPlanningContext.freeWindows.length) {
+      toast("There are no open windows left today for AI to schedule.");
+      return;
+    }
+
+    setPlanMode("ai");
+    setAiPlanning(true);
+    setAiPlanError("");
+
+    try {
+      const response = await fetch(getAiPlanUrl(), {
+        method: "POST",
+        headers: getSupabaseFunctionHeaders(),
+        body: JSON.stringify(aiPlanningContext),
+      });
+
+      const result = await readJsonResponse(response, "AI planner");
+      if (!response.ok || !result.ok) {
+        throw new Error(result.error || "AI planning failed.");
+      }
+
+      const taskMap = new Map(tasks.map((task) => [String(task.id), task]));
+      const suggestions = Array.isArray(result.suggestions)
+        ? result.suggestions
+            .map((suggestion) => {
+              const task = taskMap.get(String(suggestion.taskId));
+              if (!task) return null;
+
+              const start = new Date(suggestion.start);
+              const end = new Date(suggestion.end);
+              if (Number.isNaN(start.getTime()) || Number.isNaN(end.getTime()) || end <= start) {
+                return null;
+              }
+
+              return {
+                task,
+                start,
+                end,
+                bucket: getTaskWorkflowBucket(task),
+                preferredWindow: task.preferred_time_window || "any",
+                rationale: String(suggestion.rationale || ""),
+              };
+            })
+            .filter(Boolean)
+        : [];
+
+      setAiPlanSummary(String(result.summary || ""));
+      setAiPlanSuggestions(suggestions);
+
+      if (!suggestions.length) {
+        toast("AI reviewed your day but did not find a clean schedule to apply.");
+      }
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "AI planning failed.";
+      setAiPlanError(message);
+      setAiPlanSuggestions([]);
+      toast.error(message);
+    } finally {
+      setAiPlanning(false);
+    }
+  }
+
+  async function handleApplyPlanMyDay(planSuggestions = activePlanSuggestions) {
+    if (!planSuggestions.length || applyingPlan) return;
 
     setApplyingPlan(true);
 
     try {
-      for (const suggestion of todayPlanSuggestions) {
+      for (const suggestion of planSuggestions) {
         const { error } = await supabase
           .from("tasks")
           .update({
@@ -940,8 +1141,9 @@ export default function App() {
         }
       }
 
-      toast.success("Applied your plan for today.");
+      toast.success(planMode === "ai" ? "Applied your AI plan for today." : "Applied your plan for today.");
       setPlannerPanel("overview");
+      setPlanMode("smart");
       focusToday();
       fetchTasks();
     } catch (error) {
@@ -1603,24 +1805,57 @@ export default function App() {
                             <div className="planner-plan-header">
                               <div>
                                 <span className="planner-quick-add-kicker">Auto Plan</span>
-                                <h3>Suggested schedule for today</h3>
+                                <h3>{planMode === "ai" ? "AI-assisted schedule for today" : "Suggested schedule for today"}</h3>
                                 <p>
-                                  DayLy is placing overdue, due-today, and unscheduled work into open
-                                  time slots.
+                                  {planMode === "ai"
+                                    ? "OpenAI is ranking the best work to schedule into today's open windows while keeping the plan realistic."
+                                    : "DayLy is placing overdue, due-today, and unscheduled work into open time slots."}
                                 </p>
+                                {planMode === "ai" && aiPlanSummary && (
+                                  <div className="planner-ai-summary">{aiPlanSummary}</div>
+                                )}
                               </div>
-                              <button
-                                className="btn primary"
-                                onClick={handleApplyPlanMyDay}
-                                disabled={applyingPlan || !todayPlanSuggestions.length}
-                              >
-                                {applyingPlan ? "Applying..." : "Apply Plan"}
-                              </button>
+                              <div className="planner-plan-actions">
+                                <div className="planner-plan-mode-toggle">
+                                  <button
+                                    className={`btn ${planMode === "smart" ? "primary" : "ghost"}`}
+                                    onClick={() => setPlanMode("smart")}
+                                  >
+                                    Smart Plan
+                                  </button>
+                                  <button
+                                    className={`btn ${planMode === "ai" ? "primary" : "ghost"}`}
+                                    onClick={() => setPlanMode("ai")}
+                                  >
+                                    AI Assist
+                                  </button>
+                                </div>
+                                <div className="planner-plan-action-row">
+                                  <button
+                                    className="btn ghost"
+                                    onClick={handleGenerateAiPlan}
+                                    disabled={aiPlanning}
+                                  >
+                                    {aiPlanning ? "Thinking..." : "Generate AI Plan"}
+                                  </button>
+                                  <button
+                                    className="btn primary"
+                                    onClick={() => handleApplyPlanMyDay(activePlanSuggestions)}
+                                    disabled={applyingPlan || !activePlanSuggestions.length}
+                                  >
+                                    {applyingPlan ? "Applying..." : planMode === "ai" ? "Apply AI Plan" : "Apply Plan"}
+                                  </button>
+                                </div>
+                              </div>
                             </div>
 
+                            {planMode === "ai" && aiPlanError && (
+                              <div className="error-banner">{aiPlanError}</div>
+                            )}
+
                             <div className="planner-plan-list">
-                              {todayPlanSuggestions.length ? (
-                                todayPlanSuggestions.map((suggestion) => (
+                              {activePlanSuggestions.length ? (
+                                activePlanSuggestions.map((suggestion) => (
                                   <article key={suggestion.task.id} className="planner-plan-item">
                                     <div className="planner-plan-time">
                                       {suggestion.start.toLocaleTimeString([], {
@@ -1648,13 +1883,17 @@ export default function App() {
                                             : suggestion.preferredWindow}
                                         </span>
                                       </div>
+                                      {planMode === "ai" && suggestion.rationale && (
+                                        <div className="planner-plan-rationale">{suggestion.rationale}</div>
+                                      )}
                                     </div>
                                   </article>
                                 ))
                               ) : (
                                 <div className="planner-agenda-empty">
-                                  No smart scheduling suggestions right now. Add unscheduled work with
-                                  duration estimates to generate a daily plan.
+                                  {planMode === "ai"
+                                    ? "No AI schedule yet. Generate a plan after adding unscheduled work and leaving some open time today."
+                                    : "No smart scheduling suggestions right now. Add unscheduled work with duration estimates to generate a daily plan."}
                                 </div>
                               )}
                             </div>

@@ -2826,6 +2826,32 @@ body {
   max-width: 680px;
 }
 
+.planner-plan-actions {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 12px;
+}
+
+.planner-plan-mode-toggle,
+.planner-plan-action-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  justify-content: flex-end;
+}
+
+.planner-ai-summary {
+  margin-top: 14px;
+  padding: 12px 14px;
+  border-radius: 14px;
+  background: rgba(15, 23, 42, 0.06);
+  color: var(--app-text);
+  font-size: 14px;
+  line-height: 1.55;
+  max-width: 700px;
+}
+
 .planner-plan-list {
   display: flex;
   flex-direction: column;
@@ -2868,6 +2894,12 @@ body {
   flex-wrap: wrap;
   gap: 8px;
   align-items: center;
+}
+
+.planner-plan-rationale {
+  font-size: 13px;
+  line-height: 1.55;
+  color: var(--app-text-soft);
 }
 
 .planner-plan-window {
@@ -3459,6 +3491,11 @@ body.dark .planner-plan-item,
 body.dark .kanban-column {
   background: var(--app-panel);
   border-color: var(--app-border);
+}
+
+body.dark .planner-ai-summary {
+  background: rgba(148, 163, 184, 0.12);
+  color: var(--app-text);
 }
 
 body.dark .topbar,
