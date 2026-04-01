@@ -2566,6 +2566,9 @@ body {
   gap: 20px;
   padding: 20px;
   background: transparent;
+  min-height: 100vh;
+  height: auto;
+  align-items: stretch;
 }
 
 .sidebar {
@@ -2642,6 +2645,7 @@ body {
   border-radius: 28px;
   box-shadow: var(--app-shadow);
   backdrop-filter: blur(22px);
+  overflow: visible;
 }
 
 .topbar {
@@ -2688,9 +2692,10 @@ body {
   display: flex;
   flex-direction: column;
   gap: 18px;
+  height: auto;
   min-height: 0;
   padding: 18px;
-  overflow-y: auto;
+  overflow: visible;
 }
 
 .planner-workspace {
@@ -2722,11 +2727,11 @@ body {
 }
 
 .planner-workspace.with-dock .planner-calendar-shell {
-  min-height: calc(100vh - 420px);
+  min-height: clamp(260px, 38vh, 430px);
 }
 
 .planner-workspace.with-dock .planner-calendar-shell .fc {
-  min-height: calc(100vh - 440px);
+  min-height: clamp(220px, 34vh, 390px);
 }
 
 .planner-calendar-shell .fc-scrollgrid {
@@ -2746,7 +2751,7 @@ body {
   border-radius: 22px;
   background: var(--app-panel);
   box-shadow: var(--app-shadow-subtle);
-  overflow: hidden;
+  overflow: visible;
 }
 
 .planner-dock-tabs {
@@ -2852,10 +2857,54 @@ body {
   max-width: 700px;
 }
 
+.planner-ai-prompt-card {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 16px 18px;
+  border: 1px solid var(--app-border);
+  border-radius: 18px;
+  background: rgba(255, 255, 255, 0.84);
+}
+
+.planner-ai-prompt-label {
+  font-size: 13px;
+  font-weight: 800;
+  letter-spacing: 0.02em;
+  color: var(--app-text);
+}
+
+.planner-ai-prompt-input {
+  width: 100%;
+  min-height: 104px;
+  resize: vertical;
+  padding: 12px 14px;
+  border-radius: 14px;
+  border: 1px solid rgba(148, 163, 184, 0.24);
+  background: rgba(255, 255, 255, 0.96);
+  color: var(--app-text);
+  font: inherit;
+  line-height: 1.55;
+}
+
+.planner-ai-prompt-input:focus {
+  outline: 2px solid rgba(37, 99, 235, 0.18);
+  border-color: rgba(37, 99, 235, 0.28);
+}
+
+.planner-ai-prompt-help {
+  font-size: 13px;
+  line-height: 1.5;
+  color: var(--app-text-soft);
+}
+
 .planner-plan-list {
   display: flex;
   flex-direction: column;
   gap: 12px;
+  max-height: min(48vh, 520px);
+  overflow-y: auto;
+  padding-right: 4px;
 }
 
 .planner-plan-item {
@@ -2874,6 +2923,15 @@ body {
   font-weight: 800;
   letter-spacing: -0.02em;
   color: var(--app-text);
+}
+
+.planner-plan-day {
+  margin-bottom: 6px;
+  font-size: 12px;
+  font-weight: 800;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--app-text-soft);
 }
 
 .planner-plan-content {
@@ -3498,6 +3556,12 @@ body.dark .planner-ai-summary {
   color: var(--app-text);
 }
 
+body.dark .planner-ai-prompt-card,
+body.dark .planner-ai-prompt-input {
+  background: var(--app-panel);
+  border-color: var(--app-border);
+}
+
 body.dark .topbar,
 body.dark .topbar-btn,
 body.dark .btn.ghost,
@@ -3689,6 +3753,20 @@ body.dark .fc .fc-timegrid-slot-label-cushion {
   .planner-plan-item {
     display: grid;
     grid-template-columns: 1fr;
+  }
+
+  .planner-plan-actions,
+  .planner-plan-mode-toggle,
+  .planner-plan-action-row {
+    width: 100%;
+    justify-content: flex-start;
+    align-items: stretch;
+  }
+
+  .planner-plan-list {
+    max-height: none;
+    overflow: visible;
+    padding-right: 0;
   }
 
   .topbar {

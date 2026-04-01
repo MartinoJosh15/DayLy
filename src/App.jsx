@@ -48,6 +48,8 @@ const ROUTINE_EXCLUDE_KEYWORDS = ["gym", "class", "lecture", "workout", "practic
 const PLANNER_CATEGORY_OPTIONS = ["all", "school", "work", "personal", "health", "errands", "other"];
 const HOME_UPCOMING_LIMIT = 5;
 const WORKFLOW_BUCKET_ORDER = ["inbox", "today", "upcoming", "overdue", "done"];
+const AUTO_PLAN_HORIZON_DAYS = 7;
+const AUTO_PLAN_MAX_SUGGESTIONS = 8;
 const TIME_WINDOW_RANGES = {
   any: { startHour: 8, endHour: 22 },
   morning: { startHour: 8, endHour: 12 },
@@ -228,11 +230,25 @@ function addMinutes(date, minutes) {
   return new Date(date.getTime() + minutes * 60000);
 }
 
+function addDays(date, days) {
+  const value = new Date(date);
+  value.setDate(value.getDate() + days);
+  return value;
+}
+
 function formatLocalDateInput(date) {
   const year = date.getFullYear();
   const month = String(date.getMonth() + 1).padStart(2, "0");
   const day = String(date.getDate()).padStart(2, "0");
   return `${year}-${month}-${day}`;
+}
+
+function formatPlanSuggestionDay(date) {
+  return date.toLocaleDateString([], {
+    weekday: "short",
+    month: "short",
+    day: "numeric",
+  });
 }
 
 function getPlanningPriorityRank(priority) {
@@ -252,6 +268,20 @@ function getScheduledBlocksForDate(tasks, targetDate) {
       if (!task.start_time || !task.end_time) return false;
       const start = new Date(task.start_time);
       return start >= dayStart && start <= dayEnd;
+    })
+    .map((task) => ({
+      start: new Date(task.start_time),
+      end: new Date(task.end_time),
+    }))
+    .sort((a, b) => a.start - b.start);
+}
+
+function getScheduledBlocksForRange(tasks, rangeStart, rangeEnd) {
+  return tasks
+    .filter((task) => {
+      if (!task.start_time || !task.end_time) return false;
+      const start = new Date(task.start_time);
+      return start >= rangeStart && start <= rangeEnd;
     })
     .map((task) => ({
       start: new Date(task.start_time),
@@ -290,19 +320,33 @@ function getAutoPlanCandidates(tasks, now, { includeUpcoming = false } = {}) {
 }
 
 function buildSmartPlanSuggestions(tasks, now = new Date()) {
-  const scheduledBlocks = getScheduledBlocksForDate(tasks, now);
-  const candidates = getAutoPlanCandidates(tasks, now);
+  const horizonEnd = endOfDay(addDays(now, AUTO_PLAN_HORIZON_DAYS - 1));
+  const scheduledBlocks = getScheduledBlocksForRange(tasks, now, horizonEnd);
+  const candidates = getAutoPlanCandidates(tasks, now, { includeUpcoming: true });
   const workingBlocks = [...scheduledBlocks];
   const suggestions = [];
 
   for (const task of candidates) {
     const preferredWindow = task.preferred_time_window || "any";
     const { startHour, endHour } = TIME_WINDOW_RANGES[preferredWindow] || TIME_WINDOW_RANGES.any;
-    const rangeStart = setDateWithHour(now, startHour);
-    const rangeEnd = setDateWithHour(now, endHour);
     const durationMinutes = task.estimated_duration_minutes || 60;
+    let slot = null;
 
-    const slot = findNextAvailableSlot(workingBlocks, rangeStart, rangeEnd, durationMinutes);
+    for (let offset = 0; offset < AUTO_PLAN_HORIZON_DAYS; offset += 1) {
+      const day = addDays(now, offset);
+      const preferredStart = setDateWithHour(day, startHour);
+      const preferredEnd = setDateWithHour(day, endHour);
+      const rangeStart =
+        offset === 0
+          ? new Date(Math.max(preferredStart.getTime(), now.getTime()))
+          : preferredStart;
+
+      if (rangeStart >= preferredEnd) continue;
+
+      slot = findNextAvailableSlot(workingBlocks, rangeStart, preferredEnd, durationMinutes);
+      if (slot) break;
+    }
+
     if (!slot) continue;
 
     suggestions.push({
@@ -317,44 +361,51 @@ function buildSmartPlanSuggestions(tasks, now = new Date()) {
     workingBlocks.push({ start: slot.start, end: slot.end });
     workingBlocks.sort((a, b) => a.start - b.start);
 
-    if (suggestions.length >= 5) break;
+    if (suggestions.length >= AUTO_PLAN_MAX_SUGGESTIONS) break;
   }
 
   return suggestions;
 }
 
 function buildPlanningWindows(tasks, now = new Date()) {
-  const scheduledBlocks = getScheduledBlocksForDate(tasks, now);
-  const planningStart = new Date(Math.max(setDateWithHour(now, 8).getTime(), now.getTime()));
-  const planningEnd = setDateWithHour(now, 22);
-
-  if (planningStart >= planningEnd) return [];
-
   const windows = [];
-  let cursor = new Date(planningStart);
 
-  for (const block of scheduledBlocks) {
-    if (block.end <= cursor) continue;
-    if (block.start >= planningEnd) break;
+  for (let offset = 0; offset < AUTO_PLAN_HORIZON_DAYS; offset += 1) {
+    const day = addDays(now, offset);
+    const scheduledBlocks = getScheduledBlocksForDate(tasks, day);
+    const planningStart =
+      offset === 0
+        ? new Date(Math.max(setDateWithHour(day, 8).getTime(), now.getTime()))
+        : setDateWithHour(day, 8);
+    const planningEnd = setDateWithHour(day, 22);
 
-    const windowEnd = new Date(Math.min(block.start.getTime(), planningEnd.getTime()));
-    if (windowEnd > cursor) {
+    if (planningStart >= planningEnd) continue;
+
+    let cursor = new Date(planningStart);
+
+    for (const block of scheduledBlocks) {
+      if (block.end <= cursor) continue;
+      if (block.start >= planningEnd) break;
+
+      const windowEnd = new Date(Math.min(block.start.getTime(), planningEnd.getTime()));
+      if (windowEnd > cursor) {
+        windows.push({
+          start: new Date(cursor),
+          end: windowEnd,
+        });
+      }
+
+      if (block.end > cursor) {
+        cursor = new Date(block.end);
+      }
+    }
+
+    if (cursor < planningEnd) {
       windows.push({
         start: new Date(cursor),
-        end: windowEnd,
+        end: new Date(planningEnd),
       });
     }
-
-    if (block.end > cursor) {
-      cursor = new Date(block.end);
-    }
-  }
-
-  if (cursor < planningEnd) {
-    windows.push({
-      start: new Date(cursor),
-      end: new Date(planningEnd),
-    });
   }
 
   return windows.filter((window) => window.end > window.start);
@@ -422,6 +473,7 @@ export default function App() {
   const [aiPlanSummary, setAiPlanSummary] = useState("");
   const [aiPlanError, setAiPlanError] = useState("");
   const [aiPlanSuggestions, setAiPlanSuggestions] = useState([]);
+  const [aiPlanningPrompt, setAiPlanningPrompt] = useState("");
 
   const [visiblePriorities, setVisiblePriorities] = useState({
     high: true,
@@ -471,6 +523,12 @@ export default function App() {
     setAiPlanSummary("");
     setAiPlanError("");
   }, [tasks]);
+
+  useEffect(() => {
+    setAiPlanSuggestions([]);
+    setAiPlanSummary("");
+    setAiPlanError("");
+  }, [aiPlanningPrompt]);
 
   const basePlannerTasks = useMemo(() => {
     const query = plannerSearch.trim().toLowerCase();
@@ -620,11 +678,12 @@ export default function App() {
     return {
       timezone: Intl.DateTimeFormat().resolvedOptions().timeZone || "America/New_York",
       now: now.toISOString(),
-      maxSuggestions: 5,
+      userPrompt: aiPlanningPrompt.trim(),
+      maxSuggestions: AUTO_PLAN_MAX_SUGGESTIONS,
       freeWindows: windows.map((window) => ({
         start: window.start.toISOString(),
         end: window.end.toISOString(),
-        label: `${window.start.toLocaleTimeString([], {
+        label: `${formatPlanSuggestionDay(window.start)} · ${window.start.toLocaleTimeString([], {
           hour: "numeric",
           minute: "2-digit",
         })} - ${window.end.toLocaleTimeString([], {
@@ -634,7 +693,7 @@ export default function App() {
       })),
       tasks: candidates,
     };
-  }, [tasks]);
+  }, [aiPlanningPrompt, tasks]);
 
   const activePlanSuggestions = planMode === "ai" ? aiPlanSuggestions : todayPlanSuggestions;
 
@@ -1059,7 +1118,7 @@ export default function App() {
     }
 
     if (!aiPlanningContext.freeWindows.length) {
-      toast("There are no open windows left today for AI to schedule.");
+      toast("There are no open windows left this week for AI to schedule.");
       return;
     }
 
@@ -1141,7 +1200,7 @@ export default function App() {
         }
       }
 
-      toast.success(planMode === "ai" ? "Applied your AI plan for today." : "Applied your plan for today.");
+      toast.success(planMode === "ai" ? "Applied your AI plan for the week." : "Applied your plan for the week.");
       setPlannerPanel("overview");
       setPlanMode("smart");
       focusToday();
@@ -1805,11 +1864,11 @@ export default function App() {
                             <div className="planner-plan-header">
                               <div>
                                 <span className="planner-quick-add-kicker">Auto Plan</span>
-                                <h3>{planMode === "ai" ? "AI-assisted schedule for today" : "Suggested schedule for today"}</h3>
+                                <h3>{planMode === "ai" ? "AI-assisted schedule for this week" : "Suggested schedule for this week"}</h3>
                                 <p>
                                   {planMode === "ai"
-                                    ? "OpenAI is ranking the best work to schedule into today's open windows while keeping the plan realistic."
-                                    : "DayLy is placing overdue, due-today, and unscheduled work into open time slots."}
+                                    ? "OpenAI is ranking the best work to schedule into this week's open windows while keeping the plan realistic."
+                                    : "DayLy is placing overdue, due-soon, and unscheduled work into open time slots across the week."}
                                 </p>
                                 {planMode === "ai" && aiPlanSummary && (
                                   <div className="planner-ai-summary">{aiPlanSummary}</div>
@@ -1849,6 +1908,24 @@ export default function App() {
                               </div>
                             </div>
 
+                            {planMode === "ai" && (
+                              <section className="planner-ai-prompt-card">
+                                <label className="planner-ai-prompt-label" htmlFor="ai-planning-prompt">
+                                  Tell DayLy what kind of plan you want
+                                </label>
+                                <textarea
+                                  id="ai-planning-prompt"
+                                  className="planner-ai-prompt-input"
+                                  placeholder="Examples: Prioritize school first and keep tonight light. Focus on overdue work before anything else. Build me a low-stress plan with one hard task and a few quick wins."
+                                  value={aiPlanningPrompt}
+                                  onChange={(event) => setAiPlanningPrompt(event.target.value)}
+                                />
+                                <div className="planner-ai-prompt-help">
+                                  DayLy will use your prompt as guidance, but it will only schedule tasks and open time windows that already exist in your workspace.
+                                </div>
+                              </section>
+                            )}
+
                             {planMode === "ai" && aiPlanError && (
                               <div className="error-banner">{aiPlanError}</div>
                             )}
@@ -1858,6 +1935,7 @@ export default function App() {
                                 activePlanSuggestions.map((suggestion) => (
                                   <article key={suggestion.task.id} className="planner-plan-item">
                                     <div className="planner-plan-time">
+                                      <div className="planner-plan-day">{formatPlanSuggestionDay(suggestion.start)}</div>
                                       {suggestion.start.toLocaleTimeString([], {
                                         hour: "numeric",
                                         minute: "2-digit",
@@ -1892,8 +1970,8 @@ export default function App() {
                               ) : (
                                 <div className="planner-agenda-empty">
                                   {planMode === "ai"
-                                    ? "No AI schedule yet. Generate a plan after adding unscheduled work and leaving some open time today."
-                                    : "No smart scheduling suggestions right now. Add unscheduled work with duration estimates to generate a daily plan."}
+                                    ? "No AI schedule yet. Generate a plan after adding unscheduled work and leaving some open time this week."
+                                    : "No smart scheduling suggestions right now. Add unscheduled work with duration estimates to generate a weekly plan."}
                                 </div>
                               )}
                             </div>

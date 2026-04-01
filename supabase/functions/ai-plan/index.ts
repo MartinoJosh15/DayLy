@@ -101,7 +101,12 @@ function suggestionsOverlap(a: PlanningSuggestion, b: PlanningSuggestion) {
   return aStart < bEnd && bStart < aEnd;
 }
 
-function validateSuggestions(rawSuggestions: unknown, tasks: PlanningTask[], windows: PlanningWindow[]) {
+function validateSuggestions(
+  rawSuggestions: unknown,
+  tasks: PlanningTask[],
+  windows: PlanningWindow[],
+  maxSuggestions: number
+) {
   const allowedTaskIds = new Set(tasks.map((task) => task.id));
   const suggestions = Array.isArray(rawSuggestions) ? rawSuggestions : [];
   const normalized: PlanningSuggestion[] = [];
@@ -141,7 +146,7 @@ function validateSuggestions(rawSuggestions: unknown, tasks: PlanningTask[], win
     usedTaskIds.add(suggestion.taskId);
   }
 
-  return deduped.slice(0, 5);
+  return deduped.slice(0, maxSuggestions);
 }
 
 Deno.serve(async (request) => {
@@ -164,11 +169,15 @@ Deno.serve(async (request) => {
     const body = await request.json();
     const timezone = typeof body?.timezone === "string" ? body.timezone : "America/New_York";
     const now = typeof body?.now === "string" ? body.now : new Date().toISOString();
+    const userPrompt =
+      typeof body?.userPrompt === "string" && body.userPrompt.trim()
+        ? body.userPrompt.trim()
+        : "";
     const freeWindows = Array.isArray(body?.freeWindows) ? body.freeWindows : [];
     const tasks = Array.isArray(body?.tasks) ? body.tasks : [];
     const maxSuggestions = Number.isFinite(Number(body?.maxSuggestions))
-      ? Math.max(1, Math.min(5, Number(body.maxSuggestions)))
-      : 5;
+      ? Math.max(1, Math.min(10, Number(body.maxSuggestions)))
+      : 8;
 
     if (!tasks.length) {
       return jsonResponse(200, {
@@ -181,7 +190,7 @@ Deno.serve(async (request) => {
     if (!freeWindows.length) {
       return jsonResponse(200, {
         ok: true,
-        summary: "No open time windows were available today, so there was nothing to schedule.",
+        summary: "No open time windows were available this week, so there was nothing to schedule.",
         suggestions: [],
       });
     }
@@ -213,21 +222,24 @@ Deno.serve(async (request) => {
 
     const systemPrompt = [
       "You are DayLy's AI planning assistant.",
-      "Create a focused, realistic plan for the rest of today.",
+      "Create a focused, realistic plan for the upcoming week.",
       "Only schedule tasks and time windows provided in the input.",
       "Never invent new task IDs or time windows.",
-      "Prefer overdue, due-today, and high-priority tasks.",
+      "Treat the user's planning prompt as guidance for emphasis, ordering, tradeoffs, and focus.",
+      "If the prompt asks for work that is not represented in the provided tasks, mention that in the summary but do not invent extra scheduled items.",
+      "Prefer overdue, due-soon, and high-priority tasks.",
       "Respect each task's estimated duration and preferred time window when possible.",
-      "Avoid excessive context switching and leave some breathing room when the day is packed.",
+      "Avoid excessive context switching and leave some breathing room when the week is packed.",
       `Return at most ${maxSuggestions} suggestions.`,
     ].join(" ");
 
-    const userPrompt = JSON.stringify(
+    const plannerPayloadText = JSON.stringify(
       {
         timezone,
         now,
+        userPrompt,
         planningGoal:
-          "Choose the best tasks to schedule into the available windows for today and explain the plan briefly.",
+          "Choose the best tasks to schedule into the available windows over the next week and explain the plan briefly.",
         maxSuggestions,
         freeWindows,
         tasks,
@@ -254,7 +266,7 @@ Deno.serve(async (request) => {
           },
           {
             role: "user",
-            content: [{ type: "input_text", text: userPrompt }],
+            content: [{ type: "input_text", text: plannerPayloadText }],
           },
         ],
         text: {
@@ -284,14 +296,19 @@ Deno.serve(async (request) => {
     }
 
     const parsed = JSON.parse(outputText) as PlanningResponse;
-    const validatedSuggestions = validateSuggestions(parsed.suggestions, tasks as PlanningTask[], freeWindows as PlanningWindow[]);
+    const validatedSuggestions = validateSuggestions(
+      parsed.suggestions,
+      tasks as PlanningTask[],
+      freeWindows as PlanningWindow[],
+      maxSuggestions
+    );
 
     return jsonResponse(200, {
       ok: true,
       summary:
         typeof parsed.summary === "string" && parsed.summary.trim()
           ? parsed.summary.trim()
-          : "AI generated a daily plan based on your open time windows and task priorities.",
+          : "AI generated a weekly plan based on your open time windows and task priorities.",
       suggestions: validatedSuggestions,
       model: OPENAI_MODEL,
     });
