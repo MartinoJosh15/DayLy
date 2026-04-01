@@ -450,6 +450,11 @@ function findNextAvailableSlot(events, rangeStart, rangeEnd, durationMinutes) {
   return null;
 }
 
+function getAuthRedirectUrl() {
+  if (typeof window === "undefined") return "";
+  return `${window.location.origin}${window.location.pathname}`;
+}
+
 export default function App() {
   const [activeModule, setActiveModule] = useState("home");
 
@@ -459,6 +464,7 @@ export default function App() {
   const [authEmail, setAuthEmail] = useState("");
   const [authSubmitting, setAuthSubmitting] = useState(false);
   const [claimingLegacyTasks, setClaimingLegacyTasks] = useState(false);
+  const [showLegacyClaimCard, setShowLegacyClaimCard] = useState(true);
   const [calendarView, setCalendarView] = useState("week");
   const [currentDate, setCurrentDate] = useState(new Date());
 
@@ -507,24 +513,55 @@ export default function App() {
   }, [theme]);
 
   useEffect(() => {
+    setShowLegacyClaimCard(true);
+  }, [currentUserId]);
+
+  useEffect(() => {
     if (!supabase) {
       setAuthLoading(false);
       return undefined;
     }
 
     let mounted = true;
+    const url = new URL(window.location.href);
+    const authCode = url.searchParams.get("code");
+    const authError =
+      url.searchParams.get("error_description") ||
+      url.searchParams.get("error") ||
+      (url.hash.startsWith("#error=") ? new URLSearchParams(url.hash.slice(1)).get("error") : "");
 
-    supabase.auth
-      .getSession()
-      .then(({ data, error }) => {
+    async function restoreSession() {
+      if (authError) {
+        if (mounted) {
+          toast.error(decodeURIComponent(authError));
+          setAuthLoading(false);
+        }
+        return;
+      }
+
+      if (authCode) {
+        const { error } = await supabase.auth.exchangeCodeForSession(authCode);
+        if (error) {
+          if (mounted) {
+            toast.error(error.message || "Could not finish signing in from the email link.");
+            setAuthLoading(false);
+          }
+          return;
+        }
+
+        window.history.replaceState({}, document.title, getAuthRedirectUrl());
+      }
+
+      const { data, error } = await supabase.auth.getSession();
         if (!mounted) return;
         if (error) {
           toast.error(error.message || "Could not restore your session.");
         }
         setSession(data.session ?? null);
         setAuthLoading(false);
-      })
-      .catch((error) => {
+    }
+
+    restoreSession().catch((error) => {
         if (!mounted) return;
         toast.error(error instanceof Error ? error.message : "Could not restore your session.");
         setAuthLoading(false);
@@ -561,7 +598,7 @@ export default function App() {
     const { error } = await supabase.auth.signInWithOtp({
       email,
       options: {
-        emailRedirectTo: window.location.origin,
+        emailRedirectTo: getAuthRedirectUrl(),
       },
     });
 
@@ -593,6 +630,7 @@ export default function App() {
   async function handleClaimLegacyTasks() {
     if (!supabase) return;
 
+    setShowLegacyClaimCard(false);
     setClaimingLegacyTasks(true);
     const { data, error } = await supabase.rpc("claim_unowned_tasks");
     setClaimingLegacyTasks(false);
@@ -602,6 +640,8 @@ export default function App() {
       return;
     }
 
+    fetchTasks();
+
     const claimedCount = Number(data) || 0;
     if (!claimedCount) {
       toast("No legacy tasks were available to claim.");
@@ -609,7 +649,6 @@ export default function App() {
     }
 
     toast.success(`Claimed ${claimedCount} task${claimedCount === 1 ? "" : "s"} from your older setup.`);
-    fetchTasks();
   }
 
   async function fetchTasks() {
@@ -1495,7 +1534,7 @@ export default function App() {
             </div>
           </header>
 
-          {tasks.length === 0 && (
+          {tasks.length === 0 && showLegacyClaimCard && (
             <section className="home-surface home-panel auth-empty-state">
               <div>
                 <div className="home-kicker">Migration Helper</div>
