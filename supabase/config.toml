@@ -1,7 +1,10 @@
 project_id = "dayly"
 
 [functions.canvas-scan]
-verify_jwt = false
+verify_jwt = true
 
 [functions.ai-plan]
+verify_jwt = true
+
+[functions.send-reminders]
 verify_jwt = false

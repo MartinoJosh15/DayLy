@@ -8,7 +8,10 @@ DayLy is a scheduling and task management app with calendar-first planning.
 - Drag-and-drop task rescheduling
 - Priority filtering and category coloring
 - Supabase-backed task persistence
+- Supabase Auth-backed private workspaces
 - Canvas assignment scan/import flow
+- AI-assisted weekly planning
+- Reminder foundation for future mobile push notifications
 - Home hub for future multi-use modules
 
 ## Run Locally
@@ -57,6 +60,18 @@ Use the CLI from the `Dayly` folder with:
 python ..\DayLy_CLI.py canvas --days 14 --apply
 ```
 
+## Auth And Private Workspaces
+
+DayLy now expects users to sign in with Supabase Auth so tasks, reminders, and future mobile clients can share one private account.
+
+Recommended Supabase auth setup:
+
+1. In Supabase Dashboard, enable `Email` sign-in with magic links or OTP.
+2. Apply the SQL migrations in `supabase/migrations`.
+3. After the new auth migration runs, existing pre-auth tasks will remain unowned until you claim them from the app.
+
+The frontend uses the existing Supabase anon key and browser session handling, so no extra frontend secret is required for auth.
+
 ## AWS Deployment
 
 DayLy is prepared for `AWS Amplify Hosting` with `Route 53` managing the domain.
@@ -77,6 +92,17 @@ Recommended domain structure:
    - `VITE_CANVAS_SCAN_URL`
    - `VITE_AI_PLAN_URL`
 5. Deploy the `main` branch.
+
+### Important For Auth
+
+If you use magic-link sign-in, add your production app URL in Supabase:
+
+`Authentication -> URL Configuration -> Redirect URLs`
+
+Examples:
+
+- `http://localhost:5173`
+- `https://app.day-ly.net`
 
 ### Route 53 Setup
 
@@ -112,7 +138,7 @@ Windows PowerShell:
 ```bash
 npx.cmd supabase login
 npx.cmd supabase link --project-ref your-project-id
-npx.cmd supabase functions deploy canvas-scan --no-verify-jwt
+npx.cmd supabase functions deploy canvas-scan
 ```
 
 If PowerShell blocks `npx`, use `npx.cmd` and `npm.cmd` instead of `npx` / `npm`.
@@ -120,10 +146,10 @@ If PowerShell blocks `npx`, use `npx.cmd` and `npm.cmd` instead of `npx` / `npm`
 Generic command:
 
 ```bash
-supabase functions deploy canvas-scan --no-verify-jwt
+supabase functions deploy canvas-scan
 ```
 
-If your frontend uses the same Supabase project as its main database, no extra client config is required in production.
+Canvas scan now expects a signed-in Supabase session in production so imported tasks can be attached to the correct user.
 
 If you want to point the app at a different function host, set:
 
@@ -145,7 +171,7 @@ OPENAI_MODEL=gpt-5-mini
 Deploy the AI function:
 
 ```bash
-npx.cmd supabase functions deploy ai-plan --no-verify-jwt
+npx.cmd supabase functions deploy ai-plan
 ```
 
 Optional frontend override:
@@ -154,8 +180,60 @@ Optional frontend override:
 VITE_AI_PLAN_URL=https://your-project-id.supabase.co/functions/v1/ai-plan
 ```
 
+AI planning now expects a signed-in Supabase session in production.
+
+## Reminder Foundation
+
+The reminder backend foundation now includes:
+
+- user-owned tasks via `tasks.user_id`
+- per-task reminder settings via `reminder_enabled` and `reminder_offset_minutes`
+- `user_notification_settings`
+- `device_push_tokens`
+- `task_reminders`
+- a reminder sender Edge Function at [supabase/functions/send-reminders/index.ts](C:/Users/marti/OneDrive/Documents/Task_Manager/Dayly/supabase/functions/send-reminders/index.ts)
+
+### Reminder Function Secrets
+
+Add these secrets in Supabase before deploying reminder delivery:
+
+```bash
+EXPO_ACCESS_TOKEN=
+REMINDER_CRON_SECRET=choose-a-long-random-secret
+```
+
+`EXPO_ACCESS_TOKEN` is optional for Expo Push, but recommended if you want to lock push delivery to your Expo account.
+
+### Deploy The Reminder Function
+
+```bash
+npx.cmd supabase functions deploy send-reminders --no-verify-jwt
+```
+
+### Trigger Reminder Delivery
+
+Set up a scheduler to send a POST request to:
+
+```bash
+https://your-project-id.supabase.co/functions/v1/send-reminders
+```
+
+Include this header:
+
+```bash
+x-cron-secret: your-reminder-cron-secret
+```
+
+Recommended cadence:
+
+- every 5 minutes for normal use
+- every 1 minute if you want near-real-time reminder dispatch
+
+This function will read pending reminder rows, look up active device tokens, and send push notifications through Expo.
+
 ## Security Notes
 
 - Keep `CANVAS_API_KEY` and `SUPABASE_SERVICE_ROLE_KEY` out of the React app and Amplify frontend environment variables.
 - Keep `OPENAI_API_KEY` out of the React app and Amplify frontend environment variables.
+- Keep `EXPO_ACCESS_TOKEN` and `REMINDER_CRON_SECRET` out of the React app and Amplify frontend environment variables.
 - If a token or key is pasted into chat, committed, or otherwise exposed, rotate it and update the relevant `.env` file or Supabase secret.

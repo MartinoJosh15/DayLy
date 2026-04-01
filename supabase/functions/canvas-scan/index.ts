@@ -34,6 +34,7 @@ type CanvasAssignment = {
 };
 
 type TaskInsert = {
+  user_id: string;
   title: string;
   due_date: string;
   description: string;
@@ -45,6 +46,28 @@ type TaskInsert = {
   repeat: string;
   repeat_days: string[] | null;
 };
+
+function decodeBase64Url(value: string) {
+  const normalized = value.replace(/-/g, "+").replace(/_/g, "/");
+  const padding = "=".repeat((4 - (normalized.length % 4)) % 4);
+  return atob(`${normalized}${padding}`);
+}
+
+function getUserIdFromRequest(request: Request) {
+  const authorization = request.headers.get("Authorization") || "";
+  const match = authorization.match(/^Bearer\s+(.+)$/i);
+  if (!match) return "";
+
+  const tokenParts = match[1].split(".");
+  if (tokenParts.length < 2) return "";
+
+  try {
+    const payload = JSON.parse(decodeBase64Url(tokenParts[1]));
+    return typeof payload?.sub === "string" ? payload.sub : "";
+  } catch {
+    return "";
+  }
+}
 
 function jsonResponse(status: number, body: Record<string, unknown>) {
   return new Response(JSON.stringify(body), {
@@ -233,7 +256,7 @@ function isWithinWindow(dueAt: Date, now: Date, horizon: Date, includeOverdue: b
   return dueAt >= now && dueAt <= horizon;
 }
 
-function buildTask(courseName: string, assignment: CanvasAssignment): TaskInsert {
+function buildTask(userId: string, courseName: string, assignment: CanvasAssignment): TaskInsert {
   const dueDate = new Date(assignment.due_at);
   const dueDateLocal = getLocalDateParts(dueDate);
   const dueTimeLocal = formatLocalTimeForHumans(dueDate);
@@ -250,6 +273,7 @@ function buildTask(courseName: string, assignment: CanvasAssignment): TaskInsert
   }
 
   return {
+    user_id: userId,
     title: `${courseName}: ${assignment.name}`,
     due_date: dueDateLocal,
     description: descriptionParts.join("\n\n").trim(),
@@ -281,9 +305,17 @@ Deno.serve(async (request) => {
 
   try {
     const body = await request.json().catch(() => ({}));
+    const userId = getUserIdFromRequest(request);
     const daysValue = Number(body?.days);
     const days = Number.isFinite(daysValue) ? Math.max(1, Math.min(60, Math.floor(daysValue))) : 14;
     const includeOverdue = Boolean(body?.includeOverdue);
+
+    if (!userId) {
+      return jsonResponse(401, {
+        ok: false,
+        error: "Authentication required. Sign in before scanning Canvas.",
+      });
+    }
 
     const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, {
       auth: { persistSession: false },
@@ -310,7 +342,7 @@ Deno.serve(async (request) => {
         const dueAt = new Date(assignment.due_at);
         if (Number.isNaN(dueAt.getTime())) continue;
         if (!isWithinWindow(dueAt, now, horizon, includeOverdue)) continue;
-        candidates.push(buildTask(course.name, assignment));
+        candidates.push(buildTask(userId, course.name, assignment));
       }
     }
 
@@ -330,6 +362,7 @@ Deno.serve(async (request) => {
       const { data: existingRows, error: selectError } = await supabase
         .from("tasks")
         .select("id")
+        .eq("user_id", userId)
         .eq("title", task.title)
         .eq("due_date", task.due_date)
         .limit(1);

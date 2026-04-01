@@ -19,11 +19,23 @@ const TIME_WINDOW_OPTIONS = [
   { value: "evening", label: "Evening" },
 ];
 
+const REMINDER_OFFSET_OPTIONS = [
+  { value: "5", label: "5 minutes before" },
+  { value: "10", label: "10 minutes before" },
+  { value: "15", label: "15 minutes before" },
+  { value: "30", label: "30 minutes before" },
+  { value: "60", label: "1 hour before" },
+  { value: "120", label: "2 hours before" },
+  { value: "1440", label: "1 day before" },
+];
+
 function isPlanningFieldMissing(error) {
   const message = String(error?.message || "").toLowerCase();
   return (
     message.includes("estimated_duration_minutes") ||
-    message.includes("preferred_time_window")
+    message.includes("preferred_time_window") ||
+    message.includes("reminder_enabled") ||
+    message.includes("reminder_offset_minutes")
   );
 }
 
@@ -70,6 +82,10 @@ function TaskDetailPanelContent({ task, onClose, onUpdated, onDeleted, onComplet
   );
   const [preferredTimeWindow, setPreferredTimeWindow] = useState(
     task.preferred_time_window || "any"
+  );
+  const [reminderEnabled, setReminderEnabled] = useState(Boolean(task.reminder_enabled));
+  const [reminderOffset, setReminderOffset] = useState(
+    String(task.reminder_offset_minutes || 15)
   );
 
   const [saving, setSaving] = useState(false);
@@ -118,6 +134,8 @@ function TaskDetailPanelContent({ task, onClose, onUpdated, onDeleted, onComplet
       repeat_days: repeat === "weekly" ? repeatDays : [],
       estimated_duration_minutes: Number(estimatedDuration) || null,
       preferred_time_window: preferredTimeWindow,
+      reminder_enabled: reminderEnabled,
+      reminder_offset_minutes: Number(reminderOffset) || 15,
       start_time: startIso,
       end_time: endIso,
       due_date: dueIso,
@@ -357,6 +375,30 @@ function TaskDetailPanelContent({ task, onClose, onUpdated, onDeleted, onComplet
                 </select>
               </div>
             </div>
+          </div>
+
+          <div className="card-section">
+            <label className="checkbox-row">
+              <input
+                type="checkbox"
+                checked={reminderEnabled}
+                onChange={(e) => setReminderEnabled(e.target.checked)}
+              />
+              Send a reminder for this task
+            </label>
+
+            {reminderEnabled && (
+              <div className="form-group">
+                <label>Reminder timing</label>
+                <select value={reminderOffset} onChange={(e) => setReminderOffset(e.target.value)}>
+                  {REMINDER_OFFSET_OPTIONS.map((option) => (
+                    <option key={option.value} value={option.value}>
+                      {option.label}
+                    </option>
+                  ))}
+                </select>
+              </div>
+            )}
           </div>
 
           <div className="form-group">

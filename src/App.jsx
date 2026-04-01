@@ -69,14 +69,20 @@ const PLANNING_PRIORITY_RANK = {
   low: 2,
 };
 
-function getSupabaseFunctionHeaders() {
+function getSupabaseFunctionHeaders(session) {
   const headers = {
     "Content-Type": "application/json",
   };
   const anonKey = import.meta.env.VITE_SUPABASE_ANON_KEY?.trim();
+  const accessToken = session?.access_token?.trim();
 
   if (anonKey) {
     headers.apikey = anonKey;
+  }
+
+  if (accessToken) {
+    headers.Authorization = `Bearer ${accessToken}`;
+  } else if (anonKey) {
     headers.Authorization = `Bearer ${anonKey}`;
   }
 
@@ -95,15 +101,19 @@ function getAiPlanUrl() {
   return "/api/ai-plan";
 }
 
-function getCanvasScanUrl() {
+function getCanvasScanUrl(session) {
   const explicitUrl = import.meta.env.VITE_CANVAS_SCAN_URL?.trim();
   if (explicitUrl) return explicitUrl;
+
+  const supabaseUrl = import.meta.env.VITE_SUPABASE_URL?.trim();
+  if (session?.access_token && supabaseUrl) {
+    return `${supabaseUrl}/functions/v1/canvas-scan`;
+  }
 
   if (import.meta.env.DEV) {
     return "/api/canvas-scan";
   }
 
-  const supabaseUrl = import.meta.env.VITE_SUPABASE_URL?.trim();
   if (supabaseUrl) {
     return `${supabaseUrl}/functions/v1/canvas-scan`;
   }
@@ -111,8 +121,8 @@ function getCanvasScanUrl() {
   return "/api/canvas-scan";
 }
 
-function getCanvasScanHeaders() {
-  const headers = getSupabaseFunctionHeaders();
+function getCanvasScanHeaders(session) {
+  const headers = getSupabaseFunctionHeaders(session);
 
   const explicitUrl = import.meta.env.VITE_CANVAS_SCAN_URL?.trim();
   const supabaseUrl = import.meta.env.VITE_SUPABASE_URL?.trim();
@@ -444,6 +454,11 @@ export default function App() {
   const [activeModule, setActiveModule] = useState("home");
 
   const [tasks, setTasks] = useState([]);
+  const [session, setSession] = useState(null);
+  const [authLoading, setAuthLoading] = useState(true);
+  const [authEmail, setAuthEmail] = useState("");
+  const [authSubmitting, setAuthSubmitting] = useState(false);
+  const [claimingLegacyTasks, setClaimingLegacyTasks] = useState(false);
   const [calendarView, setCalendarView] = useState("week");
   const [currentDate, setCurrentDate] = useState(new Date());
 
@@ -484,21 +499,129 @@ export default function App() {
   const isPlannerModule = activeModule === "planner";
   const isProjectsModule = activeModule === "projects";
   const showDeploymentConfig = Boolean(supabaseConfigError);
+  const currentUser = session?.user ?? null;
+  const currentUserId = currentUser?.id || "";
 
   useEffect(() => {
     document.body.classList.toggle("dark", theme === "dark");
   }, [theme]);
 
+  useEffect(() => {
+    if (!supabase) {
+      setAuthLoading(false);
+      return undefined;
+    }
+
+    let mounted = true;
+
+    supabase.auth
+      .getSession()
+      .then(({ data, error }) => {
+        if (!mounted) return;
+        if (error) {
+          toast.error(error.message || "Could not restore your session.");
+        }
+        setSession(data.session ?? null);
+        setAuthLoading(false);
+      })
+      .catch((error) => {
+        if (!mounted) return;
+        toast.error(error instanceof Error ? error.message : "Could not restore your session.");
+        setAuthLoading(false);
+      });
+
+    const {
+      data: { subscription },
+    } = supabase.auth.onAuthStateChange((_event, nextSession) => {
+      setSession(nextSession ?? null);
+      setAuthLoading(false);
+    });
+
+    return () => {
+      mounted = false;
+      subscription.unsubscribe();
+    };
+  }, []);
+
   function toggleTheme() {
     setTheme((prev) => (prev === "light" ? "dark" : "light"));
   }
 
-  async function fetchTasks() {
+  async function handleEmailSignIn() {
     if (!supabase) return;
+
+    const email = authEmail.trim();
+    if (!email) {
+      toast.error("Enter your email to get a magic link.");
+      return;
+    }
+
+    setAuthSubmitting(true);
+
+    const { error } = await supabase.auth.signInWithOtp({
+      email,
+      options: {
+        emailRedirectTo: window.location.origin,
+      },
+    });
+
+    setAuthSubmitting(false);
+
+    if (error) {
+      toast.error(error.message || "Could not send your magic link.");
+      return;
+    }
+
+    toast.success("Magic link sent. Open it on this device to sign in.");
+  }
+
+  async function handleSignOut() {
+    if (!supabase) return;
+
+    const { error } = await supabase.auth.signOut();
+    if (error) {
+      toast.error(error.message || "Could not sign out.");
+      return;
+    }
+
+    setTasks([]);
+    setSelectedTask(null);
+    setActiveModule("home");
+    toast.success("Signed out.");
+  }
+
+  async function handleClaimLegacyTasks() {
+    if (!supabase) return;
+
+    setClaimingLegacyTasks(true);
+    const { data, error } = await supabase.rpc("claim_unowned_tasks");
+    setClaimingLegacyTasks(false);
+
+    if (error) {
+      toast.error(error.message || "Could not claim legacy tasks.");
+      return;
+    }
+
+    const claimedCount = Number(data) || 0;
+    if (!claimedCount) {
+      toast("No legacy tasks were available to claim.");
+      return;
+    }
+
+    toast.success(`Claimed ${claimedCount} task${claimedCount === 1 ? "" : "s"} from your older setup.`);
+    fetchTasks();
+  }
+
+  async function fetchTasks() {
+    if (!supabase || !currentUser) {
+      setTasks([]);
+      return;
+    }
 
     const { data, error } = await supabase
       .from("tasks")
       .select("*")
+      .eq("user_id", currentUser.id)
       .order("start_time", { ascending: true });
 
     if (error) {
@@ -511,12 +634,36 @@ export default function App() {
   }
 
   useEffect(() => {
-    const timer = setTimeout(() => {
-      fetchTasks();
+    if (!supabase || !currentUserId) {
+      setTasks([]);
+      return undefined;
+    }
+
+    let cancelled = false;
+
+    const timer = setTimeout(async () => {
+        const { data, error } = await supabase
+        .from("tasks")
+        .select("*")
+        .eq("user_id", currentUserId)
+        .order("start_time", { ascending: true });
+
+      if (cancelled) return;
+
+      if (error) {
+        console.error("Error fetching tasks:", error);
+        toast.error("Could not load tasks");
+        return;
+      }
+
+      setTasks(data || []);
     }, 0);
 
-    return () => clearTimeout(timer);
-  }, []);
+    return () => {
+      cancelled = true;
+      clearTimeout(timer);
+    };
+  }, [currentUserId]);
 
   useEffect(() => {
     setAiPlanSuggestions([]);
@@ -885,6 +1032,11 @@ export default function App() {
   }
 
   async function handleQuickAddSubmit() {
+    if (!currentUserId) {
+      toast.error("Sign in before creating a task.");
+      return;
+    }
+
     if (!quickAddTitle.trim()) {
       toast.error("Quick add needs a task title.");
       return;
@@ -910,6 +1062,7 @@ export default function App() {
     }
 
     const { error } = await supabase.from("tasks").insert({
+      user_id: currentUserId,
       title: quickAddTitle.trim(),
       category: quickAddCategory,
       priority: quickAddPriority,
@@ -1080,9 +1233,9 @@ export default function App() {
     setCanvasScanning(true);
 
     try {
-      const response = await fetch(getCanvasScanUrl(), {
+      const response = await fetch(getCanvasScanUrl(session), {
         method: "POST",
-        headers: getCanvasScanHeaders(),
+        headers: getCanvasScanHeaders(session),
         body: JSON.stringify({
           days: 14,
           includeOverdue: false,
@@ -1129,7 +1282,7 @@ export default function App() {
     try {
       const response = await fetch(getAiPlanUrl(), {
         method: "POST",
-        headers: getSupabaseFunctionHeaders(),
+        headers: getSupabaseFunctionHeaders(session),
         body: JSON.stringify(aiPlanningContext),
       });
 
@@ -1249,6 +1402,71 @@ export default function App() {
             </div>
           </section>
         </div>
+      ) : authLoading ? (
+        <div className="home-page">
+          <section className="home-header">
+            <div className="home-brand">
+              <img src={logo} alt="DayLy logo" className="home-logo" />
+              <div>
+                <div className="home-kicker">Connecting</div>
+                <h1>DayLy</h1>
+                <p className="home-header-copy">Checking your workspace session...</p>
+              </div>
+            </div>
+          </section>
+        </div>
+      ) : !session ? (
+        <div className="home-page">
+          <header className="home-header">
+            <div className="home-brand">
+              <img src={logo} alt="DayLy logo" className="home-logo" />
+              <div>
+                <div className="home-kicker">Private Workspace</div>
+                <h1>DayLy</h1>
+                <p className="home-header-copy">
+                  Sign in once and your planner, reminders, and future mobile app will stay in sync.
+                </p>
+              </div>
+            </div>
+
+            <div className="home-header-actions">
+              <button className="topbar-btn" onClick={toggleTheme}>
+                {theme === "light" ? "Dark Mode" : "Light Mode"}
+              </button>
+            </div>
+          </header>
+
+          <section className="home-surface home-panel auth-surface">
+            <div className="surface-header">
+              <div>
+                <div className="home-kicker">Sign In</div>
+                <h2>Open your DayLy workspace</h2>
+              </div>
+            </div>
+
+            <p className="auth-copy">
+              Use Supabase magic-link sign-in so your web app and mobile companion can share the same
+              private tasks, reminders, and schedule.
+            </p>
+
+            <div className="auth-form">
+              <input
+                type="email"
+                className="auth-input"
+                placeholder="you@example.com"
+                value={authEmail}
+                onChange={(event) => setAuthEmail(event.target.value)}
+              />
+              <button className="btn primary" onClick={handleEmailSignIn} disabled={authSubmitting}>
+                {authSubmitting ? "Sending..." : "Send Magic Link"}
+              </button>
+            </div>
+
+            <div className="deployment-help">
+              <p>Use the same email on every device so your planner data and reminder settings stay unified.</p>
+            </div>
+          </section>
+        </div>
       ) : activeModule === "home" ? (
         <div className="home-page">
           <header className="home-header">
@@ -1264,14 +1482,35 @@ export default function App() {
             </div>
 
             <div className="home-header-actions">
+              <div className="home-user-pill">{currentUser?.email || "Signed in"}</div>
               <button className="topbar-btn" onClick={() => setActiveModule("planner")}>
                 Open Planner
               </button>
               <button className="topbar-btn" onClick={toggleTheme}>
                 {theme === "light" ? "Dark Mode" : "Light Mode"}
               </button>
+              <button className="topbar-btn" onClick={handleSignOut}>
+                Sign Out
+              </button>
             </div>
           </header>
+
+          {tasks.length === 0 && (
+            <section className="home-surface home-panel auth-empty-state">
+              <div>
+                <div className="home-kicker">Migration Helper</div>
+                <h2>Need older tasks in this new private workspace?</h2>
+                <p className="auth-copy">
+                  If you used DayLy before sign-in was added, you can claim your unowned tasks once and
+                  attach them to this account.
+                </p>
+              </div>
+
+              <button className="btn ghost" onClick={handleClaimLegacyTasks} disabled={claimingLegacyTasks}>
+                {claimingLegacyTasks ? "Claiming..." : "Claim Legacy Tasks"}
+              </button>
+            </section>
+          )}
 
           <section className="home-primary-grid">
             <section className="home-surface home-command-surface">
@@ -1497,6 +1736,11 @@ export default function App() {
               <span className="sidebar-title">DayLy</span>
             </div>
 
+            <div className="sidebar-user-meta">
+              <div className="sidebar-section-label">Signed In</div>
+              <div className="sidebar-user-email">{currentUser?.email || "Unknown user"}</div>
+            </div>
+
             <div className="sidebar-section-label">Platform</div>
             <div className="sidebar-nav">
               <button
@@ -1577,6 +1821,9 @@ export default function App() {
               </button>
               <button className="sidebar-btn" onClick={() => setSettingsOpen(true)}>
                 Settings
+              </button>
+              <button className="sidebar-btn" onClick={handleSignOut}>
+                Sign Out
               </button>
             </div>
 
@@ -1999,6 +2246,7 @@ export default function App() {
                 initialDateTime={modalInitialDateTime}
                 onClose={() => setShowModal(false)}
                 onCreated={handleTaskCreated}
+                currentUserId={currentUserId}
                 defaultCategory={isProjectsModule ? "school" : "other"}
                 categoryOptions={isProjectsModule ? ["school", "work", "other"] : undefined}
               />

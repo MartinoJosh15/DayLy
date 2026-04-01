@@ -37,11 +37,23 @@ const TIME_WINDOW_OPTIONS = [
   { value: "evening", label: "Evening" },
 ];
 
+const REMINDER_OFFSET_OPTIONS = [
+  { value: "5", label: "5 minutes before" },
+  { value: "10", label: "10 minutes before" },
+  { value: "15", label: "15 minutes before" },
+  { value: "30", label: "30 minutes before" },
+  { value: "60", label: "1 hour before" },
+  { value: "120", label: "2 hours before" },
+  { value: "1440", label: "1 day before" },
+];
+
 function isPlanningFieldMissing(error) {
   const message = String(error?.message || "").toLowerCase();
   return (
     message.includes("estimated_duration_minutes") ||
-    message.includes("preferred_time_window")
+    message.includes("preferred_time_window") ||
+    message.includes("reminder_enabled") ||
+    message.includes("reminder_offset_minutes")
   );
 }
 
@@ -68,6 +80,7 @@ export default function AddTaskModal({
   initialDateTime,
   onClose,
   onCreated,
+  currentUserId = "",
   defaultCategory = "other",
   categoryOptions,
 }) {
@@ -101,11 +114,18 @@ export default function AddTaskModal({
   const [location, setLocation] = useState("");
   const [estimatedDuration, setEstimatedDuration] = useState(isTimed ? 60 : 45);
   const [preferredTimeWindow, setPreferredTimeWindow] = useState("any");
+  const [reminderEnabled, setReminderEnabled] = useState(false);
+  const [reminderOffset, setReminderOffset] = useState("15");
 
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
 
   async function handleSubmit() {
+    if (!currentUserId) {
+      setError("Sign in before creating a task");
+      return;
+    }
+
     if (!title.trim()) {
       setError("Title is required");
       return;
@@ -137,6 +157,7 @@ export default function AddTaskModal({
     }
 
     const payload = {
+      user_id: currentUserId,
       title,
       category,
       priority,
@@ -145,6 +166,8 @@ export default function AddTaskModal({
       location: location || null,
       estimated_duration_minutes: Number(estimatedDuration) || null,
       preferred_time_window: preferredTimeWindow,
+      reminder_enabled: reminderEnabled,
+      reminder_offset_minutes: Number(reminderOffset) || 15,
       due_date: new Date(`${date}T00:00`).toISOString(),
       start_time: startUTC,
       end_time: endUTC,
@@ -154,6 +177,7 @@ export default function AddTaskModal({
 
     if (insertError && isPlanningFieldMissing(insertError)) {
       const fallbackPayload = {
+        user_id: currentUserId,
         title,
         category,
         priority,
@@ -303,6 +327,30 @@ export default function AddTaskModal({
               </select>
             </div>
           </div>
+        </div>
+
+        <div className="card-section">
+          <label className="checkbox-row">
+            <input
+              type="checkbox"
+              checked={reminderEnabled}
+              onChange={(e) => setReminderEnabled(e.target.checked)}
+            />
+            Send a reminder for this task
+          </label>
+
+          {reminderEnabled && (
+            <div className="form-group">
+              <label>Reminder timing</label>
+              <select value={reminderOffset} onChange={(e) => setReminderOffset(e.target.value)}>
+                {REMINDER_OFFSET_OPTIONS.map((option) => (
+                  <option key={option.value} value={option.value}>
+                    {option.label}
+                  </option>
+                ))}
+              </select>
+            </div>
+          )}
         </div>
 
         <div className="form-group">
