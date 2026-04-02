@@ -101,6 +101,18 @@ function getAiPlanUrl() {
   return "/api/ai-plan";
 }
 
+function getAiCaptureUrl() {
+  const explicitUrl = import.meta.env.VITE_AI_CAPTURE_URL?.trim();
+  if (explicitUrl) return explicitUrl;
+
+  const supabaseUrl = import.meta.env.VITE_SUPABASE_URL?.trim();
+  if (supabaseUrl) {
+    return `${supabaseUrl}/functions/v1/ai-capture`;
+  }
+
+  return "/api/ai-capture";
+}
+
 function getCanvasScanUrl(session) {
   const explicitUrl = import.meta.env.VITE_CANVAS_SCAN_URL?.trim();
   if (explicitUrl) return explicitUrl;
@@ -455,6 +467,56 @@ function getAuthRedirectUrl() {
   return `${window.location.origin}${window.location.pathname}`;
 }
 
+function normalizeRepeatDays(value) {
+  const allowed = new Set(["mon", "tue", "wed", "thu", "fri", "sat", "sun"]);
+  if (!Array.isArray(value)) return [];
+
+  return value
+    .map((day) => String(day || "").toLowerCase())
+    .filter((day) => allowed.has(day));
+}
+
+function toTaskInsertFromAiSuggestion(suggestion, currentUserId) {
+  const date = String(suggestion?.date || "").slice(0, 10);
+  const title = String(suggestion?.title || "").trim();
+  if (!currentUserId || !date || !title) return null;
+
+  const startTime = String(suggestion?.startTime || "").trim();
+  const endTime = String(suggestion?.endTime || "").trim();
+  let startIso = null;
+  let endIso = null;
+
+  if (startTime && endTime) {
+    const start = new Date(`${date}T${startTime}`);
+    const end = new Date(`${date}T${endTime}`);
+
+    if (Number.isNaN(start.getTime()) || Number.isNaN(end.getTime()) || end <= start) {
+      return null;
+    }
+
+    startIso = start.toISOString();
+    endIso = end.toISOString();
+  }
+
+  return {
+    user_id: currentUserId,
+    title,
+    description: String(suggestion?.description || "").trim() || null,
+    category: String(suggestion?.category || "other").toLowerCase(),
+    priority: String(suggestion?.priority || "medium").toLowerCase(),
+    repeat: String(suggestion?.repeat || "none").toLowerCase(),
+    repeat_days: normalizeRepeatDays(suggestion?.repeatDays),
+    location: String(suggestion?.location || "").trim() || null,
+    estimated_duration_minutes: Number(suggestion?.estimatedDurationMinutes) || null,
+    preferred_time_window: String(suggestion?.preferredTimeWindow || "any").toLowerCase(),
+    reminder_enabled: Boolean(suggestion?.reminderEnabled),
+    reminder_offset_minutes: Number(suggestion?.reminderOffsetMinutes) || 15,
+    due_date: new Date(`${date}T00:00`).toISOString(),
+    start_time: startIso,
+    end_time: endIso,
+  };
+}
+
 export default function App() {
   const [activeModule, setActiveModule] = useState("home");
 
@@ -488,6 +550,8 @@ export default function App() {
   const [quickAddPriority, setQuickAddPriority] = useState("medium");
   const [quickAddTimed, setQuickAddTimed] = useState(true);
   const [quickAddSaving, setQuickAddSaving] = useState(false);
+  const [aiCapturePrompt, setAiCapturePrompt] = useState("");
+  const [aiCapturing, setAiCapturing] = useState(false);
   const [applyingPlan, setApplyingPlan] = useState(false);
   const [planMode, setPlanMode] = useState("smart");
   const [aiPlanning, setAiPlanning] = useState(false);
@@ -1371,6 +1435,62 @@ export default function App() {
     }
   }
 
+  async function handleAiTaskCapture() {
+    if (aiCapturing) return;
+
+    if (!currentUserId) {
+      toast.error("Sign in before using AI task capture.");
+      return;
+    }
+
+    const prompt = aiCapturePrompt.trim();
+    if (!prompt) {
+      toast("Describe what you want DayLy to add first.");
+      return;
+    }
+
+    setAiCapturing(true);
+
+    try {
+      const response = await fetch(getAiCaptureUrl(), {
+        method: "POST",
+        headers: getSupabaseFunctionHeaders(session),
+        body: JSON.stringify({
+          userPrompt: prompt,
+          now: new Date().toISOString(),
+          timezone: Intl.DateTimeFormat().resolvedOptions().timeZone || "America/New_York",
+        }),
+      });
+
+      const result = await readJsonResponse(response, "AI task capture");
+      if (!response.ok || !result.ok) {
+        throw new Error(result.error || "AI task capture failed.");
+      }
+
+      const rows = (Array.isArray(result.tasks) ? result.tasks : [])
+        .map((suggestion) => toTaskInsertFromAiSuggestion(suggestion, currentUserId))
+        .filter(Boolean);
+
+      if (!rows.length) {
+        toast("AI could not turn that into valid tasks yet. Try adding clearer days and times.");
+        return;
+      }
+
+      const { error } = await supabase.from("tasks").insert(rows);
+      if (error) {
+        throw error;
+      }
+
+      setAiCapturePrompt("");
+      toast.success(`Added ${rows.length} task${rows.length === 1 ? "" : "s"} from your AI request.`);
+      fetchTasks();
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "AI task capture failed.");
+    } finally {
+      setAiCapturing(false);
+    }
+  }
+
   async function handleApplyPlanMyDay(planSuggestions = activePlanSuggestions) {
     if (!planSuggestions.length || applyingPlan) return;
 
@@ -2142,6 +2262,31 @@ export default function App() {
                                 {quickAddSaving ? "Adding..." : "Add"}
                               </button>
                             </div>
+
+                            <section className="planner-ai-prompt-card">
+                              <label className="planner-ai-prompt-label" htmlFor="ai-capture-prompt">
+                                Add with AI
+                              </label>
+                              <textarea
+                                id="ai-capture-prompt"
+                                className="planner-ai-prompt-input"
+                                placeholder="Example: Add my classes every Monday and Wednesday from 9:30 AM to 10:45 AM, gym every Tuesday and Thursday at 6 PM for 1 hour, and a work shift Friday from 2 PM to 6 PM."
+                                value={aiCapturePrompt}
+                                onChange={(event) => setAiCapturePrompt(event.target.value)}
+                              />
+                              <div className="planner-ai-prompt-help">
+                                Tell DayLy everything you want added in plain English. Include days, times, and whether it repeats.
+                              </div>
+                              <div className="planner-plan-action-row">
+                                <button
+                                  className="btn ghost"
+                                  onClick={handleAiTaskCapture}
+                                  disabled={aiCapturing}
+                                >
+                                  {aiCapturing ? "Adding..." : "Create Tasks with AI"}
+                                </button>
+                              </div>
+                            </section>
                           </section>
                         )}
 

@@ -6,5 +6,8 @@ verify_jwt = true
 [functions.ai-plan]
 verify_jwt = true
 
+[functions.ai-capture]
+verify_jwt = true
+
 [functions.send-reminders]
 verify_jwt = false

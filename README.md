@@ -30,12 +30,14 @@ VITE_SUPABASE_URL=your-supabase-url
 VITE_SUPABASE_ANON_KEY=your-supabase-anon-key
 VITE_CANVAS_SCAN_URL=
 VITE_AI_PLAN_URL=
+VITE_AI_CAPTURE_URL=
 ```
 
 An example file is included at [.env.example](C:/Users/marti/OneDrive/Documents/Task_Manager/Dayly/.env.example).
 
 `VITE_CANVAS_SCAN_URL` is optional. Leave it blank to use the local Vite route in development and the default Supabase Edge Function URL in production.
 `VITE_AI_PLAN_URL` is optional. Leave it blank to use the default Supabase Edge Function URL in every environment.
+`VITE_AI_CAPTURE_URL` is optional. Leave it blank to use the default Supabase Edge Function URL in every environment.
 
 ## CLI Environment Variables
 
@@ -91,6 +93,7 @@ Recommended domain structure:
    - `VITE_SUPABASE_ANON_KEY`
    - `VITE_CANVAS_SCAN_URL`
    - `VITE_AI_PLAN_URL`
+   - `VITE_AI_CAPTURE_URL`
 5. Deploy the `main` branch.
 
 ### Important For Auth
@@ -181,6 +184,31 @@ VITE_AI_PLAN_URL=https://your-project-id.supabase.co/functions/v1/ai-plan
 ```
 
 AI planning now expects a signed-in Supabase session in production.
+
+## AI Task Capture In Production
+
+Plain-English task capture uses a third Supabase Edge Function at [supabase/functions/ai-capture/index.ts](C:/Users/marti/OneDrive/Documents/Task_Manager/Dayly/supabase/functions/ai-capture/index.ts).
+
+It uses the same OpenAI secrets as AI planning:
+
+```bash
+OPENAI_API_KEY=your-openai-api-key
+OPENAI_MODEL=gpt-5-mini
+```
+
+Deploy the capture function:
+
+```bash
+npx.cmd supabase functions deploy ai-capture
+```
+
+Optional frontend override:
+
+```bash
+VITE_AI_CAPTURE_URL=https://your-project-id.supabase.co/functions/v1/ai-capture
+```
+
+AI task capture also expects a signed-in Supabase session in production.
 
 ## Reminder Foundation
 
