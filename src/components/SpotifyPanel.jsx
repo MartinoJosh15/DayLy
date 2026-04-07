@@ -85,6 +85,8 @@ function formatTypeLabel(type) {
 }
 
 function mapTrack(item) {
+  if (!item?.id) return null;
+
   return {
     id: item.id,
     type: "track",
@@ -97,6 +99,8 @@ function mapTrack(item) {
 }
 
 function mapAlbum(item) {
+  if (!item?.id) return null;
+
   return {
     id: item.id,
     type: "album",
@@ -109,6 +113,8 @@ function mapAlbum(item) {
 }
 
 function mapPlaylist(item) {
+  if (!item?.id) return null;
+
   return {
     id: item.id,
     type: "playlist",
@@ -329,7 +335,7 @@ export default function SpotifyPanel() {
           ...(data?.tracks?.items || []).map(mapTrack),
           ...(data?.albums?.items || []).map(mapAlbum),
           ...(data?.playlists?.items || []).map(mapPlaylist),
-        ];
+        ].filter(Boolean);
 
         setResults(combinedResults);
 
@@ -349,6 +355,11 @@ export default function SpotifyPanel() {
   }
 
   function handleSelectItem(item) {
+    if (!item?.id || !item?.type) {
+      setStatus("That Spotify result could not be opened. Try another one.");
+      return;
+    }
+
     setSelectedItem(item);
     setStatus(`Loaded ${item.name} ${item.type === "track" ? "in" : "into"} the embedded player.`);
   }
