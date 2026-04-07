@@ -171,6 +171,16 @@ export default function SpotifyPanel() {
           setStatus(message || "Spotify Premium is required for browser playback.");
         });
 
+        player.addListener("autoplay_failed", () => {
+          if (cancelled) return;
+          setStatus("Browser playback needs one direct click first. Press Play or select the track again.");
+        });
+
+        player.addListener("playback_error", ({ message }) => {
+          if (cancelled) return;
+          setStatus(message || "Spotify could not start playback in the browser.");
+        });
+
         player.addListener("player_state_changed", (state) => {
           if (cancelled || !state) return;
 
@@ -342,11 +352,23 @@ export default function SpotifyPanel() {
     return false;
   }
 
+  async function activateBrowserPlayer() {
+    if (!playerRef.current?.activateElement) return;
+
+    try {
+      await playerRef.current.activateElement();
+    } catch (error) {
+      console.error(error);
+    }
+  }
+
   async function playTrack(uri) {
     setBusy(true);
     setStatus("Getting your Spotify browser player ready...");
 
     try {
+      await activateBrowserPlayer();
+
       await withSpotifySession(async (session) => {
         const deviceId = await waitForDeviceReady();
 
@@ -354,6 +376,7 @@ export default function SpotifyPanel() {
           throw new Error("Spotify player is still waking up. Try again in a moment.");
         }
 
+        setStatus("Activating your browser as the Spotify playback device...");
         await transferPlaybackToBrowser(session, deviceId);
 
         let lastError = null;
@@ -410,6 +433,7 @@ export default function SpotifyPanel() {
     }
 
     try {
+      await activateBrowserPlayer();
       await playerRef.current.togglePlay();
     } catch (error) {
       toast.error(error instanceof Error ? error.message : "Could not change playback.");
@@ -423,6 +447,7 @@ export default function SpotifyPanel() {
     }
 
     try {
+      await activateBrowserPlayer();
       if (direction === "next") {
         await playerRef.current.nextTrack();
       } else {
