@@ -19,9 +19,16 @@ const EMPTY_PLAYBACK = {
   accountName: "",
 };
 
+function delay(ms) {
+  return new Promise((resolve) => {
+    window.setTimeout(resolve, ms);
+  });
+}
+
 export default function SpotifyPanel() {
   const config = getSpotifyConfig();
   const playerRef = useRef(null);
+  const playbackRef = useRef(EMPTY_PLAYBACK);
   const [spotifySession, setSpotifySession] = useState(() => getStoredSpotifySession());
   const [busy, setBusy] = useState(false);
   const [loadingSdk, setLoadingSdk] = useState(false);
@@ -30,6 +37,10 @@ export default function SpotifyPanel() {
   const [playback, setPlayback] = useState(EMPTY_PLAYBACK);
   const [status, setStatus] = useState("Connect Spotify to bring music into your workspace.");
   const [hasPremiumWarning, setHasPremiumWarning] = useState(false);
+
+  useEffect(() => {
+    playbackRef.current = playback;
+  }, [playback]);
 
   useEffect(() => {
     let mounted = true;
@@ -105,11 +116,15 @@ export default function SpotifyPanel() {
         player.addListener("ready", async ({ device_id: deviceId }) => {
           if (cancelled) return;
 
-          setPlayback((prev) => ({
-            ...prev,
-            deviceId,
-            deviceReady: true,
-          }));
+          setPlayback((prev) => {
+            const next = {
+              ...prev,
+              deviceId,
+              deviceReady: true,
+            };
+            playbackRef.current = next;
+            return next;
+          });
           setStatus("Spotify player ready. Pick a track and it will play here.");
 
           try {
@@ -130,10 +145,14 @@ export default function SpotifyPanel() {
 
         player.addListener("not_ready", () => {
           if (cancelled) return;
-          setPlayback((prev) => ({
-            ...prev,
-            deviceReady: false,
-          }));
+          setPlayback((prev) => {
+            const next = {
+              ...prev,
+              deviceReady: false,
+            };
+            playbackRef.current = next;
+            return next;
+          });
         });
 
         player.addListener("initialization_error", ({ message }) => {
@@ -156,20 +175,24 @@ export default function SpotifyPanel() {
           if (cancelled || !state) return;
 
           const current = state.track_window.current_track;
-          setPlayback((prev) => ({
-            ...prev,
-            isPlaying: !state.paused,
-            currentTrack: current
-              ? {
-                  id: current.id,
-                  name: current.name,
-                  artists: current.artists?.map((artist) => artist.name).join(", ") || "",
-                  album: current.album?.name || "",
-                  imageUrl: current.album?.images?.[0]?.url || "",
-                  uri: current.uri,
-                }
-              : null,
-          }));
+          setPlayback((prev) => {
+            const next = {
+              ...prev,
+              isPlaying: !state.paused,
+              currentTrack: current
+                ? {
+                    id: current.id,
+                    name: current.name,
+                    artists: current.artists?.map((artist) => artist.name).join(", ") || "",
+                    album: current.album?.name || "",
+                    imageUrl: current.album?.images?.[0]?.url || "",
+                    uri: current.uri,
+                  }
+                : null,
+            };
+            playbackRef.current = next;
+            return next;
+          });
         });
 
         const connected = await player.connect();
@@ -244,6 +267,7 @@ export default function SpotifyPanel() {
     setResults([]);
     setQuery("");
     setHasPremiumWarning(false);
+    playbackRef.current = EMPTY_PLAYBACK;
     setStatus("Spotify disconnected from this workspace.");
   }
 
@@ -281,24 +305,99 @@ export default function SpotifyPanel() {
     }
   }
 
-  async function playTrack(uri) {
-    if (!playback.deviceId) {
-      toast.error("Spotify player is still getting ready.");
-      return;
+  async function waitForDeviceReady() {
+    for (let attempt = 0; attempt < 8; attempt += 1) {
+      const currentPlayback = playbackRef.current;
+      if (currentPlayback.deviceId && currentPlayback.deviceReady) {
+        return currentPlayback.deviceId;
+      }
+      await delay(500);
+    }
+    return "";
+  }
+
+  async function transferPlaybackToBrowser(session, deviceId) {
+    await spotifyApiFetch("/me/player", session.accessToken, {
+      method: "PUT",
+      body: JSON.stringify({
+        device_ids: [deviceId],
+        play: false,
+      }),
+    });
+
+    for (let attempt = 0; attempt < 6; attempt += 1) {
+      await delay(350);
+
+      try {
+        const devices = await spotifyApiFetch("/me/player/devices", session.accessToken);
+        const matchedDevice = (devices?.devices || []).find((device) => device.id === deviceId);
+        if (matchedDevice) {
+          return true;
+        }
+      } catch (error) {
+        console.error(error);
+      }
     }
 
+    return false;
+  }
+
+  async function playTrack(uri) {
     setBusy(true);
+    setStatus("Getting your Spotify browser player ready...");
 
     try {
       await withSpotifySession(async (session) => {
-        await spotifyApiFetch("/me/player/play?device_id=" + encodeURIComponent(playback.deviceId), session.accessToken, {
-          method: "PUT",
-          body: JSON.stringify({ uris: [uri] }),
-        });
-        setStatus("Now playing in your DayLy workspace.");
+        const deviceId = await waitForDeviceReady();
+
+        if (!deviceId) {
+          throw new Error("Spotify player is still waking up. Try again in a moment.");
+        }
+
+        await transferPlaybackToBrowser(session, deviceId);
+
+        let lastError = null;
+        for (let attempt = 0; attempt < 3; attempt += 1) {
+          try {
+            if (attempt > 0) {
+              setStatus("Retrying playback on your browser device...");
+              await delay(900);
+            }
+
+            await spotifyApiFetch(
+              "/me/player/play?device_id=" + encodeURIComponent(deviceId),
+              session.accessToken,
+              {
+                method: "PUT",
+                body: JSON.stringify({ uris: [uri] }),
+              }
+            );
+            setStatus("Now playing in your DayLy workspace.");
+            return;
+          } catch (error) {
+            lastError = error;
+            const message = error instanceof Error ? error.message : "Could not start playback.";
+
+            if (/device not found/i.test(message)) {
+              await transferPlaybackToBrowser(session, deviceId);
+              continue;
+            }
+
+            throw error;
+          }
+        }
+
+        throw lastError || new Error("Could not start playback.");
       });
     } catch (error) {
-      toast.error(error instanceof Error ? error.message : "Could not start playback.");
+      const message = error instanceof Error ? error.message : "Could not start playback.";
+      if (/device not found/i.test(message)) {
+        setStatus("Spotify is still registering this browser as a playback device. Try again in a few seconds.");
+        toast.error("Spotify browser device is still registering. Try again in a few seconds.");
+      } else {
+        setStatus(message);
+        toast.error(message);
+      }
     } finally {
       setBusy(false);
     }
