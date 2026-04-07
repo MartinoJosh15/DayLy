@@ -28,6 +28,8 @@ Create a local `.env.local` with:
 ```bash
 VITE_SUPABASE_URL=your-supabase-url
 VITE_SUPABASE_ANON_KEY=your-supabase-anon-key
+VITE_SPOTIFY_CLIENT_ID=your-spotify-app-client-id
+VITE_SPOTIFY_REDIRECT_URI=
 VITE_CANVAS_SCAN_URL=
 VITE_AI_PLAN_URL=
 VITE_AI_CAPTURE_URL=
@@ -38,6 +40,20 @@ An example file is included at [.env.example](C:/Users/marti/OneDrive/Documents/
 `VITE_CANVAS_SCAN_URL` is optional. Leave it blank to use the local Vite route in development and the default Supabase Edge Function URL in production.
 `VITE_AI_PLAN_URL` is optional. Leave it blank to use the default Supabase Edge Function URL in every environment.
 `VITE_AI_CAPTURE_URL` is optional. Leave it blank to use the default Supabase Edge Function URL in every environment.
+`VITE_SPOTIFY_REDIRECT_URI` is optional. Leave it blank to use the current app URL, then add that exact URL to your Spotify app's redirect URI list.
+
+## Spotify Workspace Player
+
+DayLy now includes a Spotify panel in the sidebar so you can keep music inside the same workspace as your planner.
+
+Setup notes:
+
+1. Create a Spotify app in the Spotify Developer Dashboard.
+2. Copy the app's client ID into `VITE_SPOTIFY_CLIENT_ID`.
+3. Add your local and production app URLs as redirect URIs in Spotify.
+4. Use a Spotify Premium account for in-browser playback with the Web Playback SDK.
+
+The Spotify integration uses browser-based OAuth with PKCE, so no Spotify client secret should be added to the frontend app.
 
 ## CLI Environment Variables
 
@@ -258,6 +274,18 @@ Recommended cadence:
 - every 1 minute if you want near-real-time reminder dispatch
 
 This function will read pending reminder rows, look up active device tokens, and send push notifications through Expo.
+
+### Test Notifications Manually
+
+Use the notification smoke-test guide at [docs/notifications-testing.md](C:/Users/marti/OneDrive/Documents/Task_Manager/Dayly/docs/notifications-testing.md).
+
+It includes:
+
+- a quick app flow to generate a reminder
+- SQL checks for `user_notification_settings`, `tasks`, `task_reminders`, and `device_push_tokens`
+- a PowerShell example to invoke `send-reminders` manually
+
+Copy-paste SQL queries live in [supabase/manual-tests/notifications_smoke_test.sql](C:/Users/marti/OneDrive/Documents/Task_Manager/Dayly/supabase/manual-tests/notifications_smoke_test.sql).
 
 ## Security Notes
 

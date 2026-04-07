@@ -1,6 +1,24 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useState } from "react";
 import { Toaster, toast } from "react-hot-toast";
 import { supabase, supabaseConfigError } from "./utils/supabase";
+import useTaskInsights from "./hooks/useTaskInsights";
+import {
+  getAiCaptureUrl,
+  getAiPlanUrl,
+  getCanvasScanHeaders,
+  getCanvasScanUrl,
+  getSupabaseFunctionHeaders,
+  readJsonResponse,
+} from "./utils/api";
+import {
+  formatLocalDateInput,
+  formatPlanSuggestionDay,
+  formatWorkflowBucketLabel,
+  getTaskWorkflowBucket,
+  normalizeKanbanStatus,
+  startOfDay,
+  toTaskInsertFromAiSuggestion,
+} from "./utils/planning";
 
 import FullCalendarView from "./components/FullCalendarView";
 import AddTaskModal from "./components/AddTaskModal";
@@ -8,6 +26,7 @@ import TaskDetailPanel from "./components/TaskDetailPanel";
 import SettingsPanel from "./components/SettingsPanel";
 import PriorityFilter from "./components/PriorityFilter";
 import ProjectKanbanBoard from "./components/ProjectKanbanBoard";
+import SpotifyPanel from "./components/SpotifyPanel";
 
 import logo from "./assets/Logo.png";
 
@@ -42,479 +61,18 @@ const MODULES = [
   },
 ];
 
-const ACTIONABLE_PROJECT_CATEGORIES = ["school", "work"];
-const ACTIONABLE_PROJECT_KEYWORDS = ["homework", "assignment", "project", "essay", "lab", "exam", "study"];
-const ROUTINE_EXCLUDE_KEYWORDS = ["gym", "class", "lecture", "workout", "practice"];
 const PLANNER_CATEGORY_OPTIONS = ["all", "school", "work", "personal", "health", "errands", "other"];
-const HOME_UPCOMING_LIMIT = 5;
-const WORKFLOW_BUCKET_ORDER = ["inbox", "today", "upcoming", "overdue", "done"];
-const AUTO_PLAN_HORIZON_DAYS = 7;
-const AUTO_PLAN_MAX_SUGGESTIONS = 8;
-const TIME_WINDOW_RANGES = {
-  any: { startHour: 8, endHour: 22 },
-  morning: { startHour: 8, endHour: 12 },
-  afternoon: { startHour: 12, endHour: 17 },
-  evening: { startHour: 17, endHour: 22 },
+const DEFAULT_NOTIFICATION_SETTINGS = {
+  reminders_enabled: true,
+  default_reminder_offset_minutes: 15,
+  timezone: "America/New_York",
+  quiet_hours_start: null,
+  quiet_hours_end: null,
 };
-const PLANNING_BUCKET_RANK = {
-  overdue: 0,
-  today: 1,
-  inbox: 2,
-  upcoming: 3,
-  done: 4,
-};
-const PLANNING_PRIORITY_RANK = {
-  high: 0,
-  medium: 1,
-  low: 2,
-};
-
-function getSupabaseFunctionHeaders(session) {
-  const headers = {
-    "Content-Type": "application/json",
-  };
-  const anonKey = import.meta.env.VITE_SUPABASE_ANON_KEY?.trim();
-  const accessToken = session?.access_token?.trim();
-
-  if (anonKey) {
-    headers.apikey = anonKey;
-  }
-
-  if (accessToken) {
-    headers.Authorization = `Bearer ${accessToken}`;
-  } else if (anonKey) {
-    headers.Authorization = `Bearer ${anonKey}`;
-  }
-
-  return headers;
-}
-
-function getAiPlanUrl() {
-  const explicitUrl = import.meta.env.VITE_AI_PLAN_URL?.trim();
-  if (explicitUrl) return explicitUrl;
-
-  const supabaseUrl = import.meta.env.VITE_SUPABASE_URL?.trim();
-  if (supabaseUrl) {
-    return `${supabaseUrl}/functions/v1/ai-plan`;
-  }
-
-  return "/api/ai-plan";
-}
-
-function getAiCaptureUrl() {
-  const explicitUrl = import.meta.env.VITE_AI_CAPTURE_URL?.trim();
-  if (explicitUrl) return explicitUrl;
-
-  const supabaseUrl = import.meta.env.VITE_SUPABASE_URL?.trim();
-  if (supabaseUrl) {
-    return `${supabaseUrl}/functions/v1/ai-capture`;
-  }
-
-  return "/api/ai-capture";
-}
-
-function getCanvasScanUrl(session) {
-  const explicitUrl = import.meta.env.VITE_CANVAS_SCAN_URL?.trim();
-  if (explicitUrl) return explicitUrl;
-
-  const supabaseUrl = import.meta.env.VITE_SUPABASE_URL?.trim();
-  if (session?.access_token && supabaseUrl) {
-    return `${supabaseUrl}/functions/v1/canvas-scan`;
-  }
-
-  if (import.meta.env.DEV) {
-    return "/api/canvas-scan";
-  }
-
-  if (supabaseUrl) {
-    return `${supabaseUrl}/functions/v1/canvas-scan`;
-  }
-
-  return "/api/canvas-scan";
-}
-
-function getCanvasScanHeaders(session) {
-  const headers = getSupabaseFunctionHeaders(session);
-
-  const explicitUrl = import.meta.env.VITE_CANVAS_SCAN_URL?.trim();
-  const supabaseUrl = import.meta.env.VITE_SUPABASE_URL?.trim();
-  const usingSupabaseFunction =
-    Boolean(explicitUrl) || (!import.meta.env.DEV && Boolean(supabaseUrl));
-
-  if (!usingSupabaseFunction) {
-    return {
-      "Content-Type": "application/json",
-    };
-  }
-
-  return headers;
-}
-async function readJsonResponse(response, label = "Request") {
-  const contentType = response.headers.get("content-type") || "";
-  const rawText = await response.text();
-
-  if (!rawText) return {};
-
-  if (!contentType.includes("application/json")) {
-    const preview = rawText.slice(0, 120).trim().toLowerCase();
-
-    if (preview.startsWith("<!doctype") || preview.startsWith("<html")) {
-      throw new Error(
-        import.meta.env.DEV
-          ? `${label} endpoint returned HTML instead of JSON. Make sure the app is running with the expected backend route.`
-          : `${label} endpoint is unavailable. Deploy the matching Supabase edge function and set the correct app URL.`
-      );
-    }
-
-    throw new Error(`${label} returned an unexpected response format.`);
-  }
-
-  try {
-    return JSON.parse(rawText);
-  } catch {
-    throw new Error(`${label} returned invalid JSON.`);
-  }
-}
-
-function normalizeKanbanStatus(value) {
-  if (value === "todo" || value === "in_progress" || value === "done") {
-    return value;
-  }
-  return "todo";
-}
-
-function getTaskSourceDate(task) {
-  const source = task.start_time || task.due_date;
-  if (!source) return null;
-
-  const date = new Date(source);
-  return Number.isNaN(date.getTime()) ? null : date;
-}
-
-function isDashboardActionableTask(task) {
-  const repeat = String(task.repeat || "none").toLowerCase();
-  const text = `${task.title || ""} ${task.description || ""} ${task.location || ""}`.toLowerCase();
-  const looksRoutine = ROUTINE_EXCLUDE_KEYWORDS.some((word) => text.includes(word));
-  const looksProjectLike = ACTIONABLE_PROJECT_KEYWORDS.some((word) => text.includes(word));
-  const isRecurring = repeat !== "none";
-
-  if (looksRoutine && !looksProjectLike) return false;
-  if (isRecurring && !looksProjectLike) return false;
-
-  return true;
-}
-
-function getTaskWorkflowBucket(task, now = new Date()) {
-  if (task.completed_at) return "done";
-
-  const sourceDate = getTaskSourceDate(task);
-  if (!sourceDate) return "inbox";
-
-  if (sourceDate.toDateString() === now.toDateString()) {
-    return "today";
-  }
-
-  if (sourceDate < now) {
-    return "overdue";
-  }
-
-  return "upcoming";
-}
-
-function formatWorkflowBucketLabel(bucket) {
-  if (bucket === "inbox") return "Inbox";
-  if (bucket === "today") return "Today";
-  if (bucket === "upcoming") return "Upcoming";
-  if (bucket === "overdue") return "Overdue";
-  if (bucket === "done") return "Done";
-  return "Active";
-}
-
-function startOfDay(date) {
-  const value = new Date(date);
-  value.setHours(0, 0, 0, 0);
-  return value;
-}
-
-function endOfDay(date) {
-  const value = new Date(date);
-  value.setHours(23, 59, 59, 999);
-  return value;
-}
-
-function setDateWithHour(date, hour) {
-  const value = new Date(date);
-  value.setHours(hour, 0, 0, 0);
-  return value;
-}
-
-function addMinutes(date, minutes) {
-  return new Date(date.getTime() + minutes * 60000);
-}
-
-function addDays(date, days) {
-  const value = new Date(date);
-  value.setDate(value.getDate() + days);
-  return value;
-}
-
-function formatLocalDateInput(date) {
-  const year = date.getFullYear();
-  const month = String(date.getMonth() + 1).padStart(2, "0");
-  const day = String(date.getDate()).padStart(2, "0");
-  return `${year}-${month}-${day}`;
-}
-
-function formatPlanSuggestionDay(date) {
-  return date.toLocaleDateString([], {
-    weekday: "short",
-    month: "short",
-    day: "numeric",
-  });
-}
-
-function getPlanningPriorityRank(priority) {
-  return PLANNING_PRIORITY_RANK[priority || "medium"] ?? 1;
-}
-
-function getPlanningBucketRank(bucket) {
-  return PLANNING_BUCKET_RANK[bucket] ?? 5;
-}
-
-function getScheduledBlocksForDate(tasks, targetDate) {
-  const dayStart = startOfDay(targetDate);
-  const dayEnd = endOfDay(targetDate);
-
-  return tasks
-    .filter((task) => {
-      if (!task.start_time || !task.end_time) return false;
-      const start = new Date(task.start_time);
-      return start >= dayStart && start <= dayEnd;
-    })
-    .map((task) => ({
-      start: new Date(task.start_time),
-      end: new Date(task.end_time),
-    }))
-    .sort((a, b) => a.start - b.start);
-}
-
-function getScheduledBlocksForRange(tasks, rangeStart, rangeEnd) {
-  return tasks
-    .filter((task) => {
-      if (!task.start_time || !task.end_time) return false;
-      const start = new Date(task.start_time);
-      return start >= rangeStart && start <= rangeEnd;
-    })
-    .map((task) => ({
-      start: new Date(task.start_time),
-      end: new Date(task.end_time),
-    }))
-    .sort((a, b) => a.start - b.start);
-}
-
-function getAutoPlanCandidates(tasks, now, { includeUpcoming = false } = {}) {
-  return tasks
-    .filter((task) => {
-      if (task.completed_at) return false;
-      if (!isDashboardActionableTask(task)) return false;
-      if (task.start_time && task.end_time) return false;
-      const bucket = getTaskWorkflowBucket(task, now);
-      return (
-        bucket === "overdue" ||
-        bucket === "today" ||
-        bucket === "inbox" ||
-        (includeUpcoming && bucket === "upcoming")
-      );
-    })
-    .sort((a, b) => {
-      const bucketDiff =
-        getPlanningBucketRank(getTaskWorkflowBucket(a, now)) -
-        getPlanningBucketRank(getTaskWorkflowBucket(b, now));
-      if (bucketDiff !== 0) return bucketDiff;
-
-      const priorityDiff = getPlanningPriorityRank(a.priority) - getPlanningPriorityRank(b.priority);
-      if (priorityDiff !== 0) return priorityDiff;
-
-      const aTime = getTaskSourceDate(a)?.getTime() ?? Number.MAX_SAFE_INTEGER;
-      const bTime = getTaskSourceDate(b)?.getTime() ?? Number.MAX_SAFE_INTEGER;
-      return aTime - bTime;
-    });
-}
-
-function buildSmartPlanSuggestions(tasks, now = new Date()) {
-  const horizonEnd = endOfDay(addDays(now, AUTO_PLAN_HORIZON_DAYS - 1));
-  const scheduledBlocks = getScheduledBlocksForRange(tasks, now, horizonEnd);
-  const candidates = getAutoPlanCandidates(tasks, now, { includeUpcoming: true });
-  const workingBlocks = [...scheduledBlocks];
-  const suggestions = [];
-
-  for (const task of candidates) {
-    const preferredWindow = task.preferred_time_window || "any";
-    const { startHour, endHour } = TIME_WINDOW_RANGES[preferredWindow] || TIME_WINDOW_RANGES.any;
-    const durationMinutes = task.estimated_duration_minutes || 60;
-    let slot = null;
-
-    for (let offset = 0; offset < AUTO_PLAN_HORIZON_DAYS; offset += 1) {
-      const day = addDays(now, offset);
-      const preferredStart = setDateWithHour(day, startHour);
-      const preferredEnd = setDateWithHour(day, endHour);
-      const rangeStart =
-        offset === 0
-          ? new Date(Math.max(preferredStart.getTime(), now.getTime()))
-          : preferredStart;
-
-      if (rangeStart >= preferredEnd) continue;
-
-      slot = findNextAvailableSlot(workingBlocks, rangeStart, preferredEnd, durationMinutes);
-      if (slot) break;
-    }
-
-    if (!slot) continue;
-
-    suggestions.push({
-      task,
-      start: slot.start,
-      end: slot.end,
-      bucket: getTaskWorkflowBucket(task, now),
-      preferredWindow,
-      rationale: "",
-    });
-
-    workingBlocks.push({ start: slot.start, end: slot.end });
-    workingBlocks.sort((a, b) => a.start - b.start);
-
-    if (suggestions.length >= AUTO_PLAN_MAX_SUGGESTIONS) break;
-  }
-
-  return suggestions;
-}
-
-function buildPlanningWindows(tasks, now = new Date()) {
-  const windows = [];
-
-  for (let offset = 0; offset < AUTO_PLAN_HORIZON_DAYS; offset += 1) {
-    const day = addDays(now, offset);
-    const scheduledBlocks = getScheduledBlocksForDate(tasks, day);
-    const planningStart =
-      offset === 0
-        ? new Date(Math.max(setDateWithHour(day, 8).getTime(), now.getTime()))
-        : setDateWithHour(day, 8);
-    const planningEnd = setDateWithHour(day, 22);
-
-    if (planningStart >= planningEnd) continue;
-
-    let cursor = new Date(planningStart);
-
-    for (const block of scheduledBlocks) {
-      if (block.end <= cursor) continue;
-      if (block.start >= planningEnd) break;
-
-      const windowEnd = new Date(Math.min(block.start.getTime(), planningEnd.getTime()));
-      if (windowEnd > cursor) {
-        windows.push({
-          start: new Date(cursor),
-          end: windowEnd,
-        });
-      }
-
-      if (block.end > cursor) {
-        cursor = new Date(block.end);
-      }
-    }
-
-    if (cursor < planningEnd) {
-      windows.push({
-        start: new Date(cursor),
-        end: new Date(planningEnd),
-      });
-    }
-  }
-
-  return windows.filter((window) => window.end > window.start);
-}
-
-function findNextAvailableSlot(events, rangeStart, rangeEnd, durationMinutes) {
-  let cursor = new Date(rangeStart);
-
-  for (const block of events) {
-    if (block.end <= cursor) continue;
-    if (block.start >= rangeEnd) break;
-
-    if (addMinutes(cursor, durationMinutes) <= block.start) {
-      return {
-        start: new Date(cursor),
-        end: addMinutes(cursor, durationMinutes),
-      };
-    }
-
-    if (block.end > cursor) {
-      cursor = new Date(block.end);
-    }
-  }
-
-  if (addMinutes(cursor, durationMinutes) <= rangeEnd) {
-    return {
-      start: new Date(cursor),
-      end: addMinutes(cursor, durationMinutes),
-    };
-  }
-
-  return null;
-}
 
 function getAuthRedirectUrl() {
   if (typeof window === "undefined") return "";
   return `${window.location.origin}${window.location.pathname}`;
-}
-
-function normalizeRepeatDays(value) {
-  const allowed = new Set(["mon", "tue", "wed", "thu", "fri", "sat", "sun"]);
-  if (!Array.isArray(value)) return [];
-
-  return value
-    .map((day) => String(day || "").toLowerCase())
-    .filter((day) => allowed.has(day));
-}
-
-function toTaskInsertFromAiSuggestion(suggestion, currentUserId) {
-  const date = String(suggestion?.date || "").slice(0, 10);
-  const title = String(suggestion?.title || "").trim();
-  if (!currentUserId || !date || !title) return null;
-
-  const startTime = String(suggestion?.startTime || "").trim();
-  const endTime = String(suggestion?.endTime || "").trim();
-  let startIso = null;
-  let endIso = null;
-
-  if (startTime && endTime) {
-    const start = new Date(`${date}T${startTime}`);
-    const end = new Date(`${date}T${endTime}`);
-
-    if (Number.isNaN(start.getTime()) || Number.isNaN(end.getTime()) || end <= start) {
-      return null;
-    }
-
-    startIso = start.toISOString();
-    endIso = end.toISOString();
-  }
-
-  return {
-    user_id: currentUserId,
-    title,
-    description: String(suggestion?.description || "").trim() || null,
-    category: String(suggestion?.category || "other").toLowerCase(),
-    priority: String(suggestion?.priority || "medium").toLowerCase(),
-    repeat: String(suggestion?.repeat || "none").toLowerCase(),
-    repeat_days: normalizeRepeatDays(suggestion?.repeatDays),
-    location: String(suggestion?.location || "").trim() || null,
-    estimated_duration_minutes: Number(suggestion?.estimatedDurationMinutes) || null,
-    preferred_time_window: String(suggestion?.preferredTimeWindow || "any").toLowerCase(),
-    reminder_enabled: Boolean(suggestion?.reminderEnabled),
-    reminder_offset_minutes: Number(suggestion?.reminderOffsetMinutes) || 15,
-    due_date: new Date(`${date}T00:00`).toISOString(),
-    start_time: startIso,
-    end_time: endIso,
-  };
 }
 
 export default function App() {
@@ -536,6 +94,17 @@ export default function App() {
 
   const [theme, setTheme] = useState("light");
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const [notificationSettings, setNotificationSettings] = useState(DEFAULT_NOTIFICATION_SETTINGS);
+  const [notificationSettingsLoading, setNotificationSettingsLoading] = useState(false);
+  const [notificationSettingsSaving, setNotificationSettingsSaving] = useState(false);
+  const [deviceTokens, setDeviceTokens] = useState([]);
+  const [deviceTokenSaving, setDeviceTokenSaving] = useState(false);
+  const [notificationStats, setNotificationStats] = useState({
+    enabledTaskCount: 0,
+    queuedReminderCount: 0,
+    nextReminderAt: null,
+    upcomingReminders: [],
+  });
   const [canvasScanning, setCanvasScanning] = useState(false);
   const [plannerSearch, setPlannerSearch] = useState("");
   const [plannerCategory, setPlannerCategory] = useState("all");
@@ -579,6 +148,17 @@ export default function App() {
   useEffect(() => {
     setShowLegacyClaimCard(true);
   }, [currentUserId]);
+
+  useEffect(() => {
+    const enabledTaskCount = tasks.filter(
+      (task) => Boolean(task.reminder_enabled) && !task.completed_at
+    ).length;
+
+    setNotificationStats((prev) => ({
+      ...prev,
+      enabledTaskCount,
+    }));
+  }, [tasks]);
 
   useEffect(() => {
     if (!supabase) {
@@ -646,6 +226,121 @@ export default function App() {
 
   function toggleTheme() {
     setTheme((prev) => (prev === "light" ? "dark" : "light"));
+  }
+
+  async function handleSaveNotificationSettings(nextSettings) {
+    if (!supabase || !currentUserId) {
+      toast.error("Sign in before saving notification settings.");
+      return;
+    }
+
+    setNotificationSettingsSaving(true);
+
+    const payload = {
+      user_id: currentUserId,
+      reminders_enabled: Boolean(nextSettings.reminders_enabled),
+      default_reminder_offset_minutes: Number(nextSettings.default_reminder_offset_minutes) || 15,
+      timezone: nextSettings.timezone || "America/New_York",
+      quiet_hours_start: nextSettings.quiet_hours_start || null,
+      quiet_hours_end: nextSettings.quiet_hours_end || null,
+    };
+
+    const { data, error } = await supabase
+      .from("user_notification_settings")
+      .upsert(payload, { onConflict: "user_id" })
+      .select(
+        "reminders_enabled, default_reminder_offset_minutes, timezone, quiet_hours_start, quiet_hours_end"
+      )
+      .single();
+
+    setNotificationSettingsSaving(false);
+
+    if (error) {
+      toast.error(error.message || "Could not save notification settings.");
+      return;
+    }
+
+    setNotificationSettings({
+      ...DEFAULT_NOTIFICATION_SETTINGS,
+      ...(data || payload),
+    });
+    toast.success("Notification settings saved.");
+  }
+
+  async function handleRegisterDeviceToken(nextToken) {
+    if (!supabase || !currentUserId) {
+      toast.error("Sign in before saving a device token.");
+      return;
+    }
+
+    const tokenValue = String(nextToken.token || "").trim();
+    if (!tokenValue) {
+      toast.error("Enter a device token first.");
+      return;
+    }
+
+    setDeviceTokenSaving(true);
+
+    const payload = {
+      user_id: currentUserId,
+      token: tokenValue,
+      platform: nextToken.platform || "unknown",
+      provider: "expo",
+      device_label: String(nextToken.deviceLabel || "").trim() || null,
+      disabled_at: null,
+      last_seen_at: new Date().toISOString(),
+    };
+
+    const { data, error } = await supabase
+      .from("device_push_tokens")
+      .insert(payload)
+      .select("id, token, platform, device_label, disabled_at, created_at")
+      .single();
+
+    setDeviceTokenSaving(false);
+
+    if (error) {
+      toast.error(error.message || "Could not save device token.");
+      return;
+    }
+
+    setDeviceTokens((prev) => [
+      {
+        id: String(data.id),
+        token: data.token || "",
+        platform: data.platform || "unknown",
+        deviceLabel: data.device_label || "",
+        disabledAt: data.disabled_at || null,
+        createdAt: data.created_at || null,
+      },
+      ...prev.filter((tokenRow) => tokenRow.token !== data.token),
+    ]);
+    toast.success("Device token saved.");
+  }
+
+  async function handleDeleteDeviceToken(tokenId) {
+    if (!supabase || !currentUserId) {
+      toast.error("Sign in before removing a device token.");
+      return;
+    }
+
+    setDeviceTokenSaving(true);
+
+    const { error } = await supabase
+      .from("device_push_tokens")
+      .delete()
+      .eq("id", tokenId)
+      .eq("user_id", currentUserId);
+
+    setDeviceTokenSaving(false);
+
+    if (error) {
+      toast.error(error.message || "Could not remove device token.");
+      return;
+    }
+
+    setDeviceTokens((prev) => prev.filter((tokenRow) => tokenRow.id !== tokenId));
+    toast.success("Device token removed.");
   }
 
   async function handleEmailSignIn() {
@@ -769,6 +464,103 @@ export default function App() {
   }, [currentUserId]);
 
   useEffect(() => {
+    if (!supabase || !currentUserId) {
+      setNotificationSettings(DEFAULT_NOTIFICATION_SETTINGS);
+      setDeviceTokens([]);
+      setNotificationStats((prev) => ({
+        ...prev,
+        queuedReminderCount: 0,
+        nextReminderAt: null,
+        upcomingReminders: [],
+      }));
+      setNotificationSettingsLoading(false);
+      return undefined;
+    }
+
+    let cancelled = false;
+
+    async function loadNotificationData() {
+      setNotificationSettingsLoading(true);
+
+      const [settingsResult, remindersResult, tokensResult] = await Promise.all([
+        supabase
+          .from("user_notification_settings")
+          .select(
+            "reminders_enabled, default_reminder_offset_minutes, timezone, quiet_hours_start, quiet_hours_end"
+          )
+          .eq("user_id", currentUserId)
+          .maybeSingle(),
+        supabase
+          .from("task_reminders")
+          .select("id, task_title, scheduled_for, status")
+          .eq("user_id", currentUserId)
+          .eq("status", "pending")
+          .order("scheduled_for", { ascending: true })
+          .limit(5),
+        supabase
+          .from("device_push_tokens")
+          .select("id, token, platform, device_label, disabled_at, created_at")
+          .eq("user_id", currentUserId)
+          .order("created_at", { ascending: false }),
+      ]);
+
+      if (cancelled) return;
+
+      if (!settingsResult.error) {
+        setNotificationSettings({
+          ...DEFAULT_NOTIFICATION_SETTINGS,
+          ...(settingsResult.data || {}),
+        });
+      }
+
+      if (!remindersResult.error) {
+        const upcomingReminders = Array.isArray(remindersResult.data)
+          ? remindersResult.data.map((row) => ({
+              id: String(row.id),
+              taskTitle: row.task_title || "Untitled task",
+              scheduledFor: row.scheduled_for || null,
+              status: row.status || "pending",
+            }))
+          : [];
+
+        setNotificationStats((prev) => ({
+          ...prev,
+          queuedReminderCount: upcomingReminders.length,
+          nextReminderAt: upcomingReminders[0]?.scheduledFor || null,
+          upcomingReminders,
+        }));
+      }
+
+      if (!tokensResult.error) {
+        setDeviceTokens(
+          Array.isArray(tokensResult.data)
+            ? tokensResult.data.map((row) => ({
+                id: String(row.id),
+                token: row.token || "",
+                platform: row.platform || "unknown",
+                deviceLabel: row.device_label || "",
+                disabledAt: row.disabled_at || null,
+                createdAt: row.created_at || null,
+              }))
+            : []
+        );
+      }
+
+      setNotificationSettingsLoading(false);
+    }
+
+    loadNotificationData().catch((error) => {
+      if (cancelled) return;
+      setNotificationSettingsLoading(false);
+      toast.error(error instanceof Error ? error.message : "Could not load notification settings.");
+    });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [currentUserId, tasks]);
+
+  useEffect(() => {
     setAiPlanSuggestions([]);
     setAiPlanSummary("");
     setAiPlanError("");
@@ -780,287 +572,32 @@ export default function App() {
     setAiPlanError("");
   }, [aiPlanningPrompt]);
 
-  const basePlannerTasks = useMemo(() => {
-    const query = plannerSearch.trim().toLowerCase();
-
-    return tasks.filter((task) => {
-      const priorityVisible = visiblePriorities[task.priority || "medium"];
-      if (!priorityVisible) return false;
-
-      if (plannerCategory !== "all" && task.category !== plannerCategory) {
-        return false;
-      }
-
-      if (!query) return true;
-
-      const haystack = `${task.title || ""} ${task.description || ""} ${task.location || ""}`.toLowerCase();
-      return haystack.includes(query);
-    });
-  }, [tasks, visiblePriorities, plannerCategory, plannerSearch]);
-
-  const filteredPlannerTasks = useMemo(() => {
-    if (showCompletedTasks) return basePlannerTasks;
-    return basePlannerTasks.filter((task) => !task.completed_at);
-  }, [basePlannerTasks, showCompletedTasks]);
-
-  const homeStats = useMemo(() => {
-    const highPriorityCount = tasks.filter((t) => t.priority === "high").length;
-    const timedCount = tasks.filter((t) => t.start_time && t.end_time).length;
-    const completedCount = tasks.filter((t) => Boolean(t.completed_at)).length;
-    const now = new Date();
-    const todayKey = now.toDateString();
-    const dueTodayCount = tasks.filter((task) => {
-      if (task.completed_at) return false;
-      if (!isDashboardActionableTask(task)) return false;
-      const source = task.start_time || task.due_date;
-      if (!source) return false;
-      return new Date(source).toDateString() === todayKey;
-    }).length;
-
-    return {
-      total: tasks.length,
-      high: highPriorityCount,
-      timed: timedCount,
-      completed: completedCount,
-      dueToday: dueTodayCount,
-    };
-  }, [tasks]);
-
-  const homeUpcomingTasks = useMemo(() => {
-    const now = new Date();
-
-    return tasks
-      .filter((task) => {
-        if (task.completed_at) return false;
-        if (!isDashboardActionableTask(task)) return false;
-        const source = task.start_time || task.due_date;
-        if (!source) return false;
-        return new Date(source) >= now;
-      })
-      .sort((a, b) => {
-        const aTime = new Date(a.start_time || a.due_date).getTime();
-        const bTime = new Date(b.start_time || b.due_date).getTime();
-        return aTime - bTime;
-      });
-  }, [tasks]);
-
-  const visibleHomeUpcomingTasks = useMemo(
-    () => homeUpcomingTasks.slice(0, HOME_UPCOMING_LIMIT),
-    [homeUpcomingTasks]
-  );
-
-  const hiddenHomeUpcomingCount = Math.max(0, homeUpcomingTasks.length - HOME_UPCOMING_LIMIT);
-
-  const homeOverdueTasks = useMemo(() => {
-    const now = new Date();
-    const todayKey = now.toDateString();
-
-    return tasks
-      .filter((task) => {
-        if (task.completed_at) return false;
-        if (!isDashboardActionableTask(task)) return false;
-        const source = task.start_time || task.due_date;
-        if (!source) return false;
-        const date = new Date(source);
-        return date < now && date.toDateString() !== todayKey;
-      })
-      .sort((a, b) => {
-        const aTime = new Date(a.start_time || a.due_date).getTime();
-        const bTime = new Date(b.start_time || b.due_date).getTime();
-        return aTime - bTime;
-      })
-      .slice(0, 4);
-  }, [tasks]);
-
-  const homeRecentlyCompletedTasks = useMemo(() => {
-    return tasks
-      .filter((task) => Boolean(task.completed_at))
-      .sort((a, b) => new Date(b.completed_at).getTime() - new Date(a.completed_at).getTime())
-      .slice(0, 4);
-  }, [tasks]);
-
-  const actionableWorkflowBuckets = useMemo(() => {
-    const grouped = {
-      inbox: [],
-      today: [],
-      upcoming: [],
-      overdue: [],
-      done: [],
-    };
-
-    const actionableTasks = tasks.filter((task) => isDashboardActionableTask(task));
-    const now = new Date();
-
-    for (const task of actionableTasks) {
-      grouped[getTaskWorkflowBucket(task, now)].push(task);
-    }
-
-    for (const bucket of WORKFLOW_BUCKET_ORDER) {
-      grouped[bucket].sort((a, b) => {
-        const aTime = getTaskSourceDate(a)?.getTime() ?? Number.MAX_SAFE_INTEGER;
-        const bTime = getTaskSourceDate(b)?.getTime() ?? Number.MAX_SAFE_INTEGER;
-        return aTime - bTime;
-      });
-    }
-
-    return grouped;
-  }, [tasks]);
-
-  const todayPlanSuggestions = useMemo(() => buildSmartPlanSuggestions(tasks), [tasks]);
-
-  const aiPlanningContext = useMemo(() => {
-    const now = new Date();
-    const windows = buildPlanningWindows(tasks, now);
-    const candidates = getAutoPlanCandidates(tasks, now, { includeUpcoming: true })
-      .slice(0, 12)
-      .map((task) => ({
-        id: String(task.id),
-        title: task.title || "Untitled task",
-        category: task.category || "other",
-        priority: task.priority || "medium",
-        bucket: getTaskWorkflowBucket(task, now),
-        estimatedDurationMinutes: task.estimated_duration_minutes || 60,
-        preferredTimeWindow: task.preferred_time_window || "any",
-        dueDate: task.due_date || null,
-        description: String(task.description || "").slice(0, 400),
-      }));
-
-    return {
-      timezone: Intl.DateTimeFormat().resolvedOptions().timeZone || "America/New_York",
-      now: now.toISOString(),
-      userPrompt: aiPlanningPrompt.trim(),
-      maxSuggestions: AUTO_PLAN_MAX_SUGGESTIONS,
-      freeWindows: windows.map((window) => ({
-        start: window.start.toISOString(),
-        end: window.end.toISOString(),
-        label: `${formatPlanSuggestionDay(window.start)} · ${window.start.toLocaleTimeString([], {
-          hour: "numeric",
-          minute: "2-digit",
-        })} - ${window.end.toLocaleTimeString([], {
-          hour: "numeric",
-          minute: "2-digit",
-        })}`,
-      })),
-      tasks: candidates,
-    };
-  }, [aiPlanningPrompt, tasks]);
+  const {
+    actionableProjectTasks,
+    actionableWorkflowBuckets,
+    aiPlanningContext,
+    filteredPlannerTasks,
+    hiddenHomeUpcomingCount,
+    hiddenProjectCount,
+    homeOverdueTasks,
+    homeRecentlyCompletedTasks,
+    homeStats,
+    kanbanStatusByTask,
+    plannerFocusStats,
+    plannerStats,
+    todayPlanSuggestions,
+    visibleHomeUpcomingTasks,
+    workflowSummaryCards,
+  } = useTaskInsights({
+    tasks,
+    plannerSearch,
+    plannerCategory,
+    showCompletedTasks,
+    visiblePriorities,
+    aiPlanningPrompt,
+  });
 
   const activePlanSuggestions = planMode === "ai" ? aiPlanSuggestions : todayPlanSuggestions;
-
-  const workflowSummaryCards = useMemo(() => {
-    return [
-      {
-        key: "inbox",
-        label: "Inbox",
-        count: actionableWorkflowBuckets.inbox.length,
-        detail: "No date yet",
-      },
-      {
-        key: "today",
-        label: "Today",
-        count: actionableWorkflowBuckets.today.length,
-        detail: "Needs action now",
-      },
-      {
-        key: "upcoming",
-        label: "Upcoming",
-        count: actionableWorkflowBuckets.upcoming.length,
-        detail: "Scheduled ahead",
-      },
-      {
-        key: "overdue",
-        label: "Overdue",
-        count: actionableWorkflowBuckets.overdue.length,
-        detail: "Needs attention",
-      },
-      {
-        key: "done",
-        label: "Done",
-        count: actionableWorkflowBuckets.done.length,
-        detail: "Completed work",
-      },
-    ];
-  }, [actionableWorkflowBuckets]);
-
-  const plannerStats = useMemo(() => {
-    const timed = filteredPlannerTasks.filter((task) => task.start_time && task.end_time);
-    const high = filteredPlannerTasks.filter((task) => task.priority === "high");
-    const completed = basePlannerTasks.filter((task) => Boolean(task.completed_at));
-
-    return {
-      visible: filteredPlannerTasks.length,
-      timed: timed.length,
-      high: high.length,
-      completed: completed.length,
-    };
-  }, [basePlannerTasks, filteredPlannerTasks]);
-
-  const plannerFocusStats = useMemo(() => {
-    const now = new Date();
-    const todayKey = now.toDateString();
-    const weekAhead = new Date(now);
-    weekAhead.setDate(weekAhead.getDate() + 7);
-
-    let overdue = 0;
-    let dueToday = 0;
-    let dueThisWeek = 0;
-
-    for (const task of filteredPlannerTasks) {
-      const source = task.start_time || task.due_date;
-      if (!source) continue;
-
-      const date = new Date(source);
-      if (task.completed_at) continue;
-
-      if (date < now && date.toDateString() !== todayKey) {
-        overdue += 1;
-        continue;
-      }
-
-      if (date.toDateString() === todayKey) {
-        dueToday += 1;
-      }
-
-      if (date >= now && date <= weekAhead) {
-        dueThisWeek += 1;
-      }
-    }
-
-    return {
-      overdue,
-      dueToday,
-      dueThisWeek,
-    };
-  }, [filteredPlannerTasks]);
-
-  const actionableProjectTasks = useMemo(() => {
-    return tasks.filter((task) => {
-      const category = String(task.category || "").toLowerCase();
-      const repeat = String(task.repeat || "none").toLowerCase();
-      const text = `${task.title || ""} ${task.description || ""} ${task.location || ""}`.toLowerCase();
-
-      const isWorkCategory = ACTIONABLE_PROJECT_CATEGORIES.includes(category);
-      const looksProjectLike = ACTIONABLE_PROJECT_KEYWORDS.some((word) => text.includes(word));
-      const looksRoutine = ROUTINE_EXCLUDE_KEYWORDS.some((word) => text.includes(word));
-      const isRecurring = repeat !== "none";
-
-      if (looksRoutine && !looksProjectLike) return false;
-      if (isRecurring && !looksProjectLike) return false;
-
-      return isWorkCategory || looksProjectLike;
-    });
-  }, [tasks]);
-
-  const hiddenProjectCount = Math.max(0, tasks.length - actionableProjectTasks.length);
-
-  const kanbanStatusByTask = useMemo(() => {
-    return Object.fromEntries(
-      actionableProjectTasks.map((task) => [
-        String(task.id),
-        task.completed_at ? "done" : normalizeKanbanStatus(task.kanban_status),
-      ])
-    );
-  }, [actionableProjectTasks]);
 
   function openModule(moduleId) {
     if (moduleId === "planner" || moduleId === "projects") {
@@ -1717,7 +1254,7 @@ export default function App() {
                   <h2>Next actionable tasks</h2>
                 </div>
                 <div className="home-upcoming-count">
-                  {Math.min(homeUpcomingTasks.length, HOME_UPCOMING_LIMIT)} visible
+                  {visibleHomeUpcomingTasks.length} visible
                 </div>
               </div>
 
@@ -1985,6 +1522,8 @@ export default function App() {
                 Sign Out
               </button>
             </div>
+
+            <SpotifyPanel />
 
             {isPlannerModule && calendarView === "month" && (
               <>
@@ -2448,10 +1987,21 @@ export default function App() {
             />
 
             <SettingsPanel
+              key={`${currentUserId}:${notificationSettings.reminders_enabled}:${notificationSettings.default_reminder_offset_minutes}:${notificationSettings.timezone}:${notificationSettings.quiet_hours_start || ""}:${notificationSettings.quiet_hours_end || ""}:${settingsOpen ? "open" : "closed"}`}
               open={settingsOpen}
               onClose={() => setSettingsOpen(false)}
               theme={theme}
               toggleTheme={toggleTheme}
+              currentUserEmail={currentUser?.email || ""}
+              notificationSettings={notificationSettings}
+              notificationSettingsLoading={notificationSettingsLoading}
+              notificationSettingsSaving={notificationSettingsSaving}
+              notificationStats={notificationStats}
+              deviceTokens={deviceTokens}
+              deviceTokenSaving={deviceTokenSaving}
+              onSaveNotificationSettings={handleSaveNotificationSettings}
+              onRegisterDeviceToken={handleRegisterDeviceToken}
+              onDeleteDeviceToken={handleDeleteDeviceToken}
             />
           </main>
         </div>
