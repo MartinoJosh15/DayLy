@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { toast } from "react-hot-toast";
 import {
   beginSpotifyLogin,
@@ -17,6 +17,7 @@ function getEmbedUrl(trackId) {
 
 export default function SpotifyPanel() {
   const config = getSpotifyConfig();
+  const playerShellRef = useRef(null);
   const [spotifySession, setSpotifySession] = useState(() => getStoredSpotifySession());
   const [busy, setBusy] = useState(false);
   const [query, setQuery] = useState("");
@@ -122,6 +123,15 @@ export default function SpotifyPanel() {
     setStatus(`Loaded ${track.name} in the embedded player.`);
   }
 
+  useEffect(() => {
+    if (!selectedTrack || !playerShellRef.current) return;
+
+    playerShellRef.current.scrollIntoView({
+      behavior: "smooth",
+      block: "nearest",
+    });
+  }, [selectedTrack]);
+
   const isConfigured = Boolean(config.clientId);
 
   return (
@@ -185,7 +195,7 @@ export default function SpotifyPanel() {
           </div>
 
           {selectedTrack ? (
-            <div className="spotify-section-shell spotify-player-shell">
+            <div ref={playerShellRef} className="spotify-section-shell spotify-player-shell">
               <div className="spotify-mini-label">Player</div>
               <div className="spotify-embed-wrap">
                 <iframe

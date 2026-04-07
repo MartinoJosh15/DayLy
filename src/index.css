@@ -260,6 +260,12 @@ body.dark {
   gap: 10px;
 }
 
+.spotify-player-shell {
+  position: sticky;
+  top: 8px;
+  z-index: 2;
+}
+
 .spotify-mini-label {
   font-size: 11px;
   font-weight: 800;
@@ -325,13 +331,6 @@ body.dark {
   text-overflow: ellipsis;
 }
 
-.spotify-controls {
-  display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
-  gap: 8px;
-}
-
-.spotify-control-btn,
 .spotify-search-btn {
   min-height: 36px;
   border-radius: 12px;
@@ -342,7 +341,6 @@ body.dark {
   font-weight: 600;
 }
 
-.spotify-control-btn.primary,
 .spotify-search-btn {
   background: #1db954;
   border-color: #1db954;
@@ -353,10 +351,6 @@ body.dark {
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto;
   gap: 8px;
-}
-
-.spotify-activate-btn {
-  width: 100%;
 }
 
 .spotify-search-input {
@@ -2610,7 +2604,6 @@ body.dark .spotify-result-item small {
 }
 
 body.dark .spotify-status-card,
-body.dark .spotify-control-btn,
 body.dark .spotify-search-input,
 body.dark .spotify-result-item,
 body.dark .spotify-link-btn {
