@@ -2,6 +2,7 @@ const SPOTIFY_ACCOUNTS_BASE = "https://accounts.spotify.com";
 const SPOTIFY_API_BASE = "https://api.spotify.com/v1";
 const SPOTIFY_SESSION_STORAGE_KEY = "dayly.spotify.session";
 const SPOTIFY_PKCE_STORAGE_KEY = "dayly.spotify.pkce";
+const SPOTIFY_PKCE_SESSION_STORAGE_KEY = "dayly.spotify.pkce.session";
 
 function getConfiguredRedirectUri() {
   const explicit = import.meta.env.VITE_SPOTIFY_REDIRECT_URI?.trim();
@@ -54,22 +55,56 @@ async function createPkcePair() {
 }
 
 function savePkceState(payload) {
-  localStorage.setItem(SPOTIFY_PKCE_STORAGE_KEY, JSON.stringify(payload));
+  const serialized = JSON.stringify(payload);
+  try {
+    localStorage.setItem(SPOTIFY_PKCE_STORAGE_KEY, serialized);
+  } catch {}
+
+  try {
+    sessionStorage.setItem(SPOTIFY_PKCE_SESSION_STORAGE_KEY, serialized);
+  } catch {}
 }
 
 function getPkceState() {
-  const raw = localStorage.getItem(SPOTIFY_PKCE_STORAGE_KEY);
-  if (!raw) return null;
+  const candidates = [];
 
   try {
-    return JSON.parse(raw);
-  } catch {
-    return null;
+    candidates.push(sessionStorage.getItem(SPOTIFY_PKCE_SESSION_STORAGE_KEY));
+  } catch {}
+
+  try {
+    candidates.push(localStorage.getItem(SPOTIFY_PKCE_STORAGE_KEY));
+  } catch {}
+
+  for (const raw of candidates) {
+    if (!raw) continue;
+
+    try {
+      return JSON.parse(raw);
+    } catch {
+      continue;
+    }
   }
+
+  return null;
 }
 
 function clearPkceState() {
-  localStorage.removeItem(SPOTIFY_PKCE_STORAGE_KEY);
+  try {
+    localStorage.removeItem(SPOTIFY_PKCE_STORAGE_KEY);
+  } catch {}
+
+  try {
+    sessionStorage.removeItem(SPOTIFY_PKCE_SESSION_STORAGE_KEY);
+  } catch {}
+}
+
+function clearSpotifyCallbackParams(url) {
+  url.searchParams.delete("code");
+  url.searchParams.delete("state");
+  url.searchParams.delete("error");
+  url.searchParams.delete("error_description");
+  window.history.replaceState({}, document.title, `${url.pathname}${url.search}${url.hash}`);
 }
 
 export function getStoredSpotifySession() {
@@ -135,16 +170,23 @@ export async function maybeCompleteSpotifyLogin() {
 
   if (error) {
     clearPkceState();
-    url.searchParams.delete("error");
-    window.history.replaceState({}, document.title, `${url.pathname}${url.search}${url.hash}`);
+    clearSpotifyCallbackParams(url);
     throw new Error(`Spotify sign-in failed: ${error}.`);
   }
 
   if (!code) return null;
 
-  const pkce = getPkceState();
-  if (!pkce?.verifier || !pkce?.state || pkce.state !== state) {
+  if (!state) {
     clearPkceState();
+    clearSpotifyCallbackParams(url);
+    throw new Error("Spotify returned an incomplete login response. Click Connect Spotify again.");
+  }
+
+  const pkce = getPkceState();
+  const verifier = String(pkce?.verifier || "").trim();
+  if (!verifier || !pkce?.state || pkce.state !== state) {
+    clearPkceState();
+    clearSpotifyCallbackParams(url);
     throw new Error("Spotify sign-in could not be verified. Try connecting again.");
   }
 
@@ -158,7 +200,7 @@ export async function maybeCompleteSpotifyLogin() {
       grant_type: "authorization_code",
       code,
       redirect_uri: redirectUri,
-      code_verifier: pkce.verifier,
+      code_verifier: verifier,
     }),
   });
 
@@ -166,15 +208,24 @@ export async function maybeCompleteSpotifyLogin() {
   clearPkceState();
 
   if (!response.ok) {
-    throw new Error(data.error_description || data.error || "Spotify token exchange failed.");
+    clearSpotifyCallbackParams(url);
+
+    const rawMessage = data.error_description || data.error || "Spotify token exchange failed.";
+    if (
+      /auth code/i.test(rawMessage) ||
+      /code verifier/i.test(rawMessage) ||
+      /invalid_grant/i.test(rawMessage)
+    ) {
+      throw new Error("Spotify sign-in expired or became invalid. Click Connect Spotify and try once more.");
+    }
+
+    throw new Error(rawMessage);
   }
 
   const session = buildTokenSession(data);
   saveSpotifySession(session);
 
-  url.searchParams.delete("code");
-  url.searchParams.delete("state");
-  window.history.replaceState({}, document.title, `${url.pathname}${url.search}${url.hash}`);
+  clearSpotifyCallbackParams(url);
 
   return session;
 }
