@@ -17,9 +17,46 @@ const SEARCH_FILTERS = [
   { id: "playlist", label: "Playlists" },
 ];
 
-function getEmbedUrl(item) {
+let spotifyIframeApiPromise = null;
+
+function loadSpotifyIframeApi() {
+  if (typeof window === "undefined") {
+    return Promise.reject(new Error("Spotify embed API only loads in the browser."));
+  }
+
+  if (window.SpotifyIframeApi) {
+    return Promise.resolve(window.SpotifyIframeApi);
+  }
+
+  if (spotifyIframeApiPromise) {
+    return spotifyIframeApiPromise;
+  }
+
+  spotifyIframeApiPromise = new Promise((resolve, reject) => {
+    const existing = document.querySelector('script[src="https://open.spotify.com/embed/iframe-api/v1"]');
+
+    window.onSpotifyIframeApiReady = (IFrameAPI) => {
+      window.SpotifyIframeApi = IFrameAPI;
+      resolve(IFrameAPI);
+    };
+
+    if (existing) {
+      return;
+    }
+
+    const script = document.createElement("script");
+    script.src = "https://open.spotify.com/embed/iframe-api/v1";
+    script.async = true;
+    script.onerror = () => reject(new Error("Spotify embed API failed to load."));
+    document.body.appendChild(script);
+  });
+
+  return spotifyIframeApiPromise;
+}
+
+function getSpotifyUri(item) {
   if (!item?.id || !item?.type) return "";
-  return `https://open.spotify.com/embed/${item.type}/${item.id}?utm_source=generator&theme=0`;
+  return `spotify:${item.type}:${item.id}`;
 }
 
 function getItemSubtitle(item) {
@@ -87,8 +124,11 @@ function mapPlaylist(item) {
 export default function SpotifyPanel() {
   const config = getSpotifyConfig();
   const playerShellRef = useRef(null);
+  const embedHostRef = useRef(null);
+  const embedControllerRef = useRef(null);
   const [spotifySession, setSpotifySession] = useState(() => getStoredSpotifySession());
   const [busy, setBusy] = useState(false);
+  const [playerBusy, setPlayerBusy] = useState(false);
   const [query, setQuery] = useState("");
   const [results, setResults] = useState([]);
   const [selectedItem, setSelectedItem] = useState(null);
@@ -127,6 +167,107 @@ export default function SpotifyPanel() {
     });
   }, [selectedItem]);
 
+  useEffect(() => {
+    if (!selectedItem || !embedHostRef.current) return undefined;
+
+    let cancelled = false;
+
+    async function mountEmbed() {
+      setPlayerBusy(true);
+
+      try {
+        const IFrameAPI = await loadSpotifyIframeApi();
+        if (cancelled || !embedHostRef.current) return;
+
+        const uri = getSpotifyUri(selectedItem);
+        const host = embedHostRef.current;
+
+        if (embedControllerRef.current) {
+          try {
+            embedControllerRef.current.loadUri(uri);
+            embedControllerRef.current.play();
+            setStatus(`Loaded ${selectedItem.name} into the embedded player.`);
+            return;
+          } catch (error) {
+            console.error(error);
+            try {
+              embedControllerRef.current.destroy();
+            } catch {}
+            embedControllerRef.current = null;
+            host.innerHTML = "";
+          }
+        }
+
+        host.innerHTML = "";
+
+        IFrameAPI.createController(
+          host,
+          {
+            width: "100%",
+            height: 176,
+            uri,
+          },
+          (EmbedController) => {
+            if (cancelled) {
+              try {
+                EmbedController.destroy();
+              } catch {}
+              return;
+            }
+
+            embedControllerRef.current = EmbedController;
+
+            try {
+              EmbedController.addListener("ready", () => {
+                if (cancelled) return;
+                try {
+                  EmbedController.play();
+                } catch (error) {
+                  console.error(error);
+                }
+              });
+            } catch {}
+
+            try {
+              EmbedController.play();
+            } catch (error) {
+              console.error(error);
+            }
+          }
+        );
+
+        setStatus(`Loaded ${selectedItem.name} into the embedded player.`);
+      } catch (error) {
+        if (cancelled) return;
+        const message =
+          error instanceof Error ? error.message : "Spotify embedded player could not load.";
+        setStatus(message);
+        toast.error(message);
+      } finally {
+        if (!cancelled) {
+          setPlayerBusy(false);
+        }
+      }
+    }
+
+    mountEmbed();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [selectedItem]);
+
+  useEffect(() => {
+    return () => {
+      if (embedControllerRef.current) {
+        try {
+          embedControllerRef.current.destroy();
+        } catch {}
+        embedControllerRef.current = null;
+      }
+    };
+  }, []);
+
   async function withSpotifySession(action) {
     if (!spotifySession) {
       toast.error("Connect Spotify first.");
@@ -150,6 +291,15 @@ export default function SpotifyPanel() {
 
   function handleDisconnect() {
     clearSpotifySession();
+    if (embedControllerRef.current) {
+      try {
+        embedControllerRef.current.destroy();
+      } catch {}
+      embedControllerRef.current = null;
+    }
+    if (embedHostRef.current) {
+      embedHostRef.current.innerHTML = "";
+    }
     setSpotifySession(null);
     setResults([]);
     setQuery("");
@@ -204,8 +354,6 @@ export default function SpotifyPanel() {
   }
 
   const isConfigured = Boolean(config.clientId);
-  const embedUrl = getEmbedUrl(selectedItem);
-
   return (
     <section className="spotify-panel">
       <div className="spotify-panel-header">
@@ -278,19 +426,12 @@ export default function SpotifyPanel() {
             </form>
           </div>
 
-          {selectedItem && embedUrl ? (
+          {selectedItem ? (
             <div ref={playerShellRef} className="spotify-section-shell spotify-player-shell">
               <div className="spotify-mini-label">Player</div>
               <div className="spotify-embed-wrap">
-                <iframe
-                  title={`Spotify embed for ${selectedItem.name}`}
-                  src={embedUrl}
-                  width="100%"
-                  height="152"
-                  allow="autoplay; clipboard-write; encrypted-media; fullscreen; picture-in-picture"
-                  loading="lazy"
-                  className="spotify-embed-frame"
-                />
+                <div ref={embedHostRef} className="spotify-embed-frame" />
+                {playerBusy ? <div className="spotify-embed-loading">Loading player...</div> : null}
                 {selectedItem.spotifyUrl ? (
                   <a
                     className="spotify-open-link"

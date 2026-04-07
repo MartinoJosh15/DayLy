@@ -422,11 +422,16 @@ body.dark {
 }
 
 .spotify-embed-frame {
-  border: 0;
   border-radius: 16px;
   overflow: hidden;
   display: block;
   background: #121212;
+  min-height: 176px;
+}
+
+.spotify-embed-loading {
+  font-size: 12px;
+  color: rgba(255, 255, 255, 0.72);
 }
 
 .spotify-open-link {
