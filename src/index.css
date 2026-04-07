@@ -242,6 +242,13 @@ body.dark {
   min-width: 0;
 }
 
+.spotify-now-playing-selected {
+  padding: 8px;
+  border: 1px solid rgba(15, 23, 42, 0.08);
+  border-radius: 14px;
+  background: rgba(255, 255, 255, 0.56);
+}
+
 .spotify-artwork,
 .spotify-artwork-placeholder {
   width: 54px;
@@ -315,6 +322,10 @@ body.dark {
   gap: 8px;
 }
 
+.spotify-activate-btn {
+  width: 100%;
+}
+
 .spotify-search-input {
   min-width: 0;
   min-height: 38px;
@@ -331,6 +342,25 @@ body.dark {
   gap: 8px;
 }
 
+.spotify-embed-wrap {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.spotify-embed-frame {
+  border: 0;
+  border-radius: 16px;
+  overflow: hidden;
+}
+
+.spotify-open-link {
+  font-size: 12px;
+  font-weight: 700;
+  color: #047857;
+  text-decoration: none;
+}
+
 .spotify-result-item {
   display: flex;
   align-items: center;
@@ -342,6 +372,11 @@ body.dark {
   padding: 8px;
   cursor: pointer;
   text-align: left;
+}
+
+.spotify-result-item.is-selected {
+  border-color: rgba(29, 185, 84, 0.45);
+  box-shadow: 0 8px 18px rgba(29, 185, 84, 0.12);
 }
 
 .spotify-result-item span {
@@ -2525,8 +2560,14 @@ body.dark .spotify-result-item {
 }
 
 body.dark .spotify-account-name,
-body.dark .spotify-link-btn {
+body.dark .spotify-link-btn,
+body.dark .spotify-open-link {
   color: #86efac;
+}
+
+body.dark .spotify-now-playing-selected {
+  background: rgba(15, 23, 42, 0.72);
+  border-color: rgba(148, 163, 184, 0.18);
 }
 
 body.dark .home-upcoming-title,
