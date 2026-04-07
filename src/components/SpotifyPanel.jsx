@@ -127,9 +127,10 @@ export default function SpotifyPanel() {
   return (
     <section className="spotify-panel">
       <div className="spotify-panel-header">
-        <div>
+        <div className="spotify-panel-heading">
           <div className="sidebar-section-label spotify-section-label">Spotify Workspace</div>
           <div className="spotify-panel-title">Focus soundtrack</div>
+          <div className="spotify-panel-copy">Search a track and keep it playing beside your planner.</div>
         </div>
         {spotifySession ? (
           <button type="button" className="spotify-link-btn" onClick={handleDisconnect}>
@@ -168,44 +169,52 @@ export default function SpotifyPanel() {
             <div className="spotify-empty-state">Search for a track, then load it in the player below.</div>
           )}
 
-          <form className="spotify-search-form" onSubmit={handleSearch}>
-            <input
-              className="spotify-search-input"
-              placeholder="Search Spotify"
-              value={query}
-              onChange={(event) => setQuery(event.target.value)}
-            />
-            <button type="submit" className="spotify-search-btn" disabled={busy}>
-              {busy ? "..." : "Find"}
-            </button>
-          </form>
+          <div className="spotify-section-shell">
+            <div className="spotify-mini-label">Search</div>
+            <form className="spotify-search-form" onSubmit={handleSearch}>
+              <input
+                className="spotify-search-input"
+                placeholder="Artist, song, or mood"
+                value={query}
+                onChange={(event) => setQuery(event.target.value)}
+              />
+              <button type="submit" className="spotify-search-btn" disabled={busy}>
+                {busy ? "..." : "Find"}
+              </button>
+            </form>
+          </div>
 
           {selectedTrack ? (
-            <div className="spotify-embed-wrap">
-              <iframe
-                title={`Spotify embed for ${selectedTrack.name}`}
-                src={getEmbedUrl(selectedTrack.id)}
-                width="100%"
-                height="152"
-                allow="autoplay; clipboard-write; encrypted-media; fullscreen; picture-in-picture"
-                loading="lazy"
-                className="spotify-embed-frame"
-              />
-              {selectedTrack.spotifyUrl ? (
-                <a
-                  className="spotify-open-link"
-                  href={selectedTrack.spotifyUrl}
-                  target="_blank"
-                  rel="noreferrer"
-                >
-                  Open in Spotify
-                </a>
-              ) : null}
+            <div className="spotify-section-shell spotify-player-shell">
+              <div className="spotify-mini-label">Player</div>
+              <div className="spotify-embed-wrap">
+                <iframe
+                  title={`Spotify embed for ${selectedTrack.name}`}
+                  src={getEmbedUrl(selectedTrack.id)}
+                  width="100%"
+                  height="152"
+                  allow="autoplay; clipboard-write; encrypted-media; fullscreen; picture-in-picture"
+                  loading="lazy"
+                  className="spotify-embed-frame"
+                />
+                {selectedTrack.spotifyUrl ? (
+                  <a
+                    className="spotify-open-link"
+                    href={selectedTrack.spotifyUrl}
+                    target="_blank"
+                    rel="noreferrer"
+                  >
+                    Open in Spotify
+                  </a>
+                ) : null}
+              </div>
             </div>
           ) : null}
 
           {results.length ? (
-            <div className="spotify-results">
+            <div className="spotify-section-shell">
+              <div className="spotify-mini-label">Results</div>
+              <div className="spotify-results">
               {results.map((result) => (
                 <button
                   key={result.id}
@@ -226,6 +235,7 @@ export default function SpotifyPanel() {
                   </span>
                 </button>
               ))}
+              </div>
             </div>
           ) : null}
 
