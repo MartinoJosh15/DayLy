@@ -26,7 +26,7 @@ import TaskDetailPanel from "./components/TaskDetailPanel";
 import SettingsPanel from "./components/SettingsPanel";
 import PriorityFilter from "./components/PriorityFilter";
 import ProjectKanbanBoard from "./components/ProjectKanbanBoard";
-import SpotifyPanel from "./components/SpotifyPanel";
+import NotesDocsWorkspace from "./components/NotesDocsWorkspace";
 
 import logo from "./assets/Logo.png";
 
@@ -55,9 +55,9 @@ const MODULES = [
   {
     id: "notes",
     title: "Notes and Docs",
-    subtitle: "Fast capture notes linked directly to tasks and deadlines.",
-    status: "Planned",
-    cta: "Coming Soon",
+    subtitle: "Your writing workspace for notes, docs, and task-driven work sessions.",
+    status: "Live",
+    cta: "Open Docs",
   },
 ];
 
@@ -128,6 +128,7 @@ export default function App() {
   const [aiPlanError, setAiPlanError] = useState("");
   const [aiPlanSuggestions, setAiPlanSuggestions] = useState([]);
   const [aiPlanningPrompt, setAiPlanningPrompt] = useState("");
+  const [notesCreateSignal, setNotesCreateSignal] = useState(0);
 
   const [visiblePriorities, setVisiblePriorities] = useState({
     high: true,
@@ -137,6 +138,7 @@ export default function App() {
 
   const isPlannerModule = activeModule === "planner";
   const isProjectsModule = activeModule === "projects";
+  const isNotesModule = activeModule === "notes";
   const showDeploymentConfig = Boolean(supabaseConfigError);
   const currentUser = session?.user ?? null;
   const currentUserId = currentUser?.id || "";
@@ -600,7 +602,7 @@ export default function App() {
   const activePlanSuggestions = planMode === "ai" ? aiPlanSuggestions : todayPlanSuggestions;
 
   function openModule(moduleId) {
-    if (moduleId === "planner" || moduleId === "projects") {
+    if (moduleId === "planner" || moduleId === "projects" || moduleId === "notes") {
       setActiveModule(moduleId);
       return;
     }
@@ -1457,6 +1459,12 @@ export default function App() {
               >
                 Project Board
               </button>
+              <button
+                className={`sidebar-btn ${isNotesModule ? "active" : ""}`}
+                onClick={() => setActiveModule("notes")}
+              >
+                Notes and Docs
+              </button>
             </div>
 
             {isPlannerModule && (
@@ -1492,16 +1500,23 @@ export default function App() {
               <button
                 className="sidebar-btn primary"
                 onClick={() => {
+                  if (isNotesModule) {
+                    setNotesCreateSignal((prev) => prev + 1);
+                    return;
+                  }
+
                   setModalInitialDateTime(new Date());
                   setShowModal(true);
                 }}
               >
-                {isProjectsModule ? "+ Add Work Task" : "+ Add Task"}
+                {isNotesModule ? "+ New Doc" : isProjectsModule ? "+ Add Work Task" : "+ Add Task"}
               </button>
 
-              <button className="sidebar-btn" onClick={handleCanvasScan} disabled={canvasScanning}>
-                {canvasScanning ? "Scanning Canvas..." : "Scan Canvas"}
-              </button>
+              {!isNotesModule && (
+                <button className="sidebar-btn" onClick={handleCanvasScan} disabled={canvasScanning}>
+                  {canvasScanning ? "Scanning Canvas..." : "Scan Canvas"}
+                </button>
+              )}
 
               {isProjectsModule && (
                 <button className="sidebar-btn" onClick={fetchTasks}>
@@ -1522,8 +1537,6 @@ export default function App() {
                 Sign Out
               </button>
             </div>
-
-            <SpotifyPanel />
 
             {isPlannerModule && calendarView === "month" && (
               <>
@@ -1618,7 +1631,7 @@ export default function App() {
                   </div>
                 </header>
               </>
-            ) : (
+            ) : isProjectsModule ? (
               <header className="topbar">
                 <div>
                   <div className="topbar-title">Project Board</div>
@@ -1628,6 +1641,18 @@ export default function App() {
                 </div>
                 <button className="topbar-btn" onClick={fetchTasks}>
                   Refresh
+                </button>
+              </header>
+            ) : (
+              <header className="topbar">
+                <div>
+                  <div className="topbar-title">Notes and Docs</div>
+                  <div className="topbar-subtitle">
+                    Draft ideas, study, and work through tasks with music and context in one place.
+                  </div>
+                </div>
+                <button className="topbar-btn" onClick={() => setNotesCreateSignal((prev) => prev + 1)}>
+                  New Doc
                 </button>
               </header>
             )}
@@ -1951,7 +1976,7 @@ export default function App() {
                     </section>
                   )}
                 </>
-              ) : (
+              ) : isProjectsModule ? (
                 <ProjectKanbanBoard
                   tasks={actionableProjectTasks}
                   statusByTask={kanbanStatusByTask}
@@ -1960,6 +1985,12 @@ export default function App() {
                   )}
                   onTaskClick={handleTaskClick}
                   onStatusChange={handleKanbanStatusChange}
+                />
+              ) : (
+                <NotesDocsWorkspace
+                  tasks={tasks}
+                  onTaskClick={handleTaskClick}
+                  createSignal={notesCreateSignal}
                 />
               )}
             </div>
